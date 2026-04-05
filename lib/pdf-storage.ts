@@ -2,9 +2,13 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, extname, join } from "node:path"
 import { randomUUID } from "node:crypto"
 
+function getTestIsolationSuffix() {
+  return process.env.NODE_TEST_CONTEXT ? `-${process.pid}` : ""
+}
+
 const STORAGE_ROOT =
   process.env.PDF_EXTRACTOR_STORAGE_ROOT ||
-  join(process.cwd(), ".data", "storage")
+  join(process.cwd(), ".data", `storage${getTestIsolationSuffix()}`)
 
 export type StoredUpload = {
   storageKey: string

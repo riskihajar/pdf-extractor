@@ -15,6 +15,13 @@ import type { StoredUpload } from "@/lib/pdf-storage"
 
 const PDFTOPPM_BINARY =
   process.env.PDFTOPPM_PATH || "/opt/homebrew/bin/pdftoppm"
+const STORAGE_ROOT =
+  process.env.PDF_EXTRACTOR_STORAGE_ROOT ||
+  join(
+    process.cwd(),
+    ".data",
+    process.env.NODE_TEST_CONTEXT ? `storage-${process.pid}` : "storage"
+  )
 
 export type RenderedPageArtifact = {
   pageNumber: number
@@ -140,7 +147,7 @@ export async function preparePdfPipeline(
   jobId: string
 ): Promise<PipelineResult> {
   const { text, pageCount } = await extractPdfText(upload.storedPath)
-  const renderDir = join(process.cwd(), ".data", "storage", "renders", jobId)
+  const renderDir = join(STORAGE_ROOT, "renders", jobId)
   const prefix = join(renderDir, "page")
 
   await rm(renderDir, { recursive: true, force: true })

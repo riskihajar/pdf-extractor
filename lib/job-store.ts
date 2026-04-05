@@ -171,9 +171,14 @@ type JobOutputRow = {
   generated_at: string | null
 }
 
+function getTestIsolationSuffix() {
+  return process.env.NODE_TEST_CONTEXT ? `-${process.pid}` : ""
+}
+
 const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
-  process.env.PDF_EXTRACTOR_JOB_DB_PATH || join(JOB_STORE_DIR, "jobs.sqlite")
+  process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
+  join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
 const JOB_STORE_SCHEMA_VERSION = 4
 
 const globalStore = globalThis as typeof globalThis & {
@@ -1533,7 +1538,11 @@ export function resetJobStoreForTests() {
   globalStore.__pdfExtractorJobDatabase__?.close()
   globalStore.__pdfExtractorJobDatabase__ = undefined
 
-  rmSync(join(process.cwd(), ".data", "storage"), {
+  const storageRoot =
+    process.env.PDF_EXTRACTOR_STORAGE_ROOT ||
+    join(process.cwd(), ".data", `storage${getTestIsolationSuffix()}`)
+
+  rmSync(storageRoot, {
     recursive: true,
     force: true,
   })

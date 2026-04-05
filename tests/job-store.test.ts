@@ -80,7 +80,7 @@ test("job store persists state in the SQLite dev file", () => {
     snapshot.jobs.find((job) => job.id === "job-2")?.status,
     "Processing"
   )
-  assert.match(getJobStorePath(), /\.data\/jobs\.sqlite$/)
+  assert.match(getJobStorePath(), /\.data\/jobs(?:-\d+)?\.sqlite$/)
 })
 
 test("job store exposes normalized logs payload for a job", () => {
