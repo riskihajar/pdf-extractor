@@ -2,7 +2,7 @@
 
 PDF Extractor adalah aplikasi berbasis Next.js untuk mengelola ekstraksi teks dari file PDF melalui pipeline dan queue yang terstruktur. Setiap file diproses sebagai job, setiap halaman dirender menjadi gambar, lalu diekstrak menggunakan vision LLM dengan protokol OpenAI-like, Tesseract OCR, atau keduanya untuk dibandingkan.
 
-Repository ini saat ini berisi fondasi frontend, dokumentasi produk, dan baseline teknis untuk membangun dashboard pipeline extraction yang bisa dipantau per file dan per halaman.
+Repository ini sekarang sudah memiliki fondasi frontend interaktif, route internal untuk config runtime dan job actions, serta dokumentasi produk untuk membawa project dari dashboard prototype menuju pipeline extraction yang lebih production-ready.
 
 ## Highlights
 
@@ -17,26 +17,32 @@ Repository ini saat ini berisi fondasi frontend, dokumentasi produk, dan baselin
 - retry untuk file atau halaman yang gagal,
 - observability status pipeline dari upload sampai export.
 
-## Current Status
+## Current Implementation Status
 
-Project saat ini sudah memiliki:
+Yang sudah ada saat ini:
 
 - Next.js App Router,
 - TypeScript,
 - Tailwind CSS v4,
 - shadcn/ui base preset,
-- dokumentasi produk awal,
-- repository GitHub di `riskihajar/pdf-extractor`.
+- dashboard interaktif untuk queue operator,
+- file picker multi-upload untuk staging job,
+- tabs detail `Pages`, `Compare`, `Output`, `Logs`,
+- route internal draft untuk `upload`, `start`, `start-all`,
+- route internal aman untuk status runtime LLM,
+- helper server-side untuk membaca env lokal tanpa mengekspos secret ke UI,
+- dokumentasi produk dan tracking progres.
 
-Yang belum dibuat saat ini:
+Yang masih belum selesai:
 
-- dashboard UI final,
-- upload flow production,
-- worker render PDF,
-- queue runtime,
+- persistence shared untuk state job,
+- worker render PDF ke image,
+- queue runtime nyata,
 - integrasi Tesseract,
-- integrasi OpenAI-like vision API,
-- export pipeline final.
+- integrasi OpenAI-like vision API untuk extraction nyata,
+- export pipeline final,
+- detail compare berbasis hasil nyata,
+- penyimpanan file upload dan page images.
 
 ## Product Workflow
 
@@ -59,14 +65,16 @@ Prinsip arsitektur yang sedang dituju:
 - render PDF ke image dijalankan di backend atau worker,
 - task queue berjalan di level halaman,
 - compare mode menyimpan hasil per engine secara terpisah,
-- output akhir digabung ke format Markdown dan plain text.
+- output akhir digabung ke format Markdown dan plain text,
+- env sensitif dibaca server-side melalui internal API, bukan langsung dari client.
 
-Catatan teknis dari brainstorming saat ini:
+Catatan teknis dari brainstorming dan implementasi saat ini:
 
 - `pdfjs-dist` cocok untuk preview halaman dan jalur JavaScript-friendly,
 - `pdftoppm` atau tool Poppler sejenis lebih cocok untuk render pipeline production di background worker,
 - Tesseract cocok untuk jalur OCR lokal,
-- vision LLM cocok untuk halaman dengan layout kompleks atau sebagai pembanding/fallback.
+- vision LLM cocok untuk halaman dengan layout kompleks atau sebagai pembanding/fallback,
+- route internal sudah mulai menggantikan mock action langsung di komponen UI.
 
 ## Tech Stack
 
@@ -80,6 +88,35 @@ Current stack di repository ini:
 - ESLint
 - Prettier
 
+## Runtime Configuration
+
+Project ini sudah mengenali konfigurasi lokal untuk runtime LLM melalui `.env.local` secara server-side.
+
+Variabel yang saat ini digunakan:
+
+- `LLM_API_KEY`
+- `LLM_BASE_URL`
+- `LLM_MODEL`
+- `LLM_REASONING_EFFORT`
+- `EXAMPLE_PDF_PATH_TO_EXTRACT`
+
+Catatan:
+
+- nilai secret tidak diekspos ke client,
+- dashboard hanya membaca status aman via route internal `app/api/config/llm/route.ts`,
+- `.env.local` harus tetap local-only dan tidak boleh di-commit.
+
+## Internal API Draft
+
+Route internal yang sudah tersedia:
+
+- `GET /api/config/llm`
+- `POST /api/jobs/upload`
+- `POST /api/jobs/start`
+- `POST /api/jobs/start-all`
+
+Route ini masih draft dan saat ini dipakai untuk menyambungkan dashboard ke action layer internal sebelum ada persistence dan worker sungguhan.
+
 ## Repository Structure
 
 Struktur utama saat ini:
@@ -87,11 +124,17 @@ Struktur utama saat ini:
 ```text
 .
 ├── app/
+│   ├── api/
+│   └── page.tsx
 ├── components/
+│   ├── dashboard/
+│   └── ui/
 ├── hooks/
 ├── lib/
 ├── public/
+├── LICENSE
 ├── PRD.md
+├── PROGRESS.md
 ├── README.md
 ├── components.json
 ├── package.json
@@ -131,6 +174,7 @@ npm run format
 ## Documentation
 
 - Product requirements document: `PRD.md`
+- Progress tracker and checklist: `PROGRESS.md`
 
 ## Roadmap
 
@@ -144,34 +188,26 @@ npm run format
 
 - tambahkan upload flow,
 - definisikan API contract dan state model,
-- sambungkan UI ke data source internal.
+- sambungkan UI ke internal route.
 
 ### Phase 3
 
+- implement shared persistence/mock store,
 - implement render worker PDF-to-image,
 - implement queue processing per halaman,
 - integrasikan Tesseract dan vision API.
 
 ### Phase 4
 
-- implement compare flow,
-- retry granular,
+- implement compare flow berbasis hasil nyata,
+- retry granular end-to-end,
 - output aggregation,
-- logs dan observability.
-
-## Suggested README Metadata
-
-- Project name: `pdf-extractor`
-- Repository: `riskihajar/pdf-extractor`
-- UI stack: Next.js + shadcn/ui
-- Primary product concept: PDF extraction pipeline and queue dashboard
+- logs dan observability produksi.
 
 ## Contributing
 
-Saat ini project masih berada di tahap desain dan pondasi teknis. Jika nanti workflow kontribusi dibutuhkan, bagian ini bisa diperluas dengan standar branch, commit, code review, dan checklist testing.
+Saat ini project masih berada di tahap prototyping dan pondasi teknis. Workflow kontribusi formal belum dibuat, tapi commit mengikuti Conventional Commits dan perubahan besar sebaiknya tetap melewati lint/typecheck.
 
 ## License
 
-Lisensi default untuk repository ini adalah MIT, kecuali ditentukan lain di masa depan.
-
-Jika kamu ingin, langkah berikutnya adalah menambahkan file `LICENSE` resmi agar deklarasi lisensi di repository konsisten.
+Project ini menggunakan lisensi MIT. Lihat `LICENSE` untuk detail lengkap.

@@ -14,9 +14,11 @@ Saat ini repository sudah diinisialisasi dengan:
 - TypeScript
 - Tailwind CSS v4
 - shadcn/ui base preset
-- dokumentasi awal produk di level repository root
+- dokumentasi produk di level repository root
+- dashboard prototype interaktif untuk operator pipeline
+- route internal awal untuk job actions dan runtime config
 
-Status implementasi saat ini masih berada pada tahap fondasi proyek dan perencanaan produk. Fokus berikutnya adalah membangun dashboard UI untuk workflow upload, queue, processing, compare, dan export.
+Status implementasi tidak lagi hanya tahap ide. Project kini sudah masuk tahap prototype interaktif dengan internal API draft, file picker multi-upload, job queue board, dan detail tabs per file.
 
 ## 3. Problem Statement
 
@@ -63,6 +65,7 @@ Pengguna menghadapi beberapa masalah utama saat mengekstrak isi PDF:
 - User harus tahu apa yang sedang terjadi tanpa membuka log teknis.
 - Compare mode harus berguna untuk QA, bukan sekadar gimmick.
 - Output harus siap dipakai ulang untuk downstream workflow.
+- Secret dan konfigurasi sensitif harus dibaca server-side, bukan diekspos ke client.
 
 ## 8. User Stories
 
@@ -76,7 +79,30 @@ Pengguna menghadapi beberapa masalah utama saat mengekstrak isi PDF:
 - Sebagai user, saya ingin melihat halaman mana yang gagal agar retry bisa dilakukan dengan cepat.
 - Sebagai user, saya ingin mengunduh hasil akhir dalam `.md` atau `.txt` agar hasil mudah dipakai di sistem lain.
 
-## 9. Core Workflow
+## 9. Current Prototype Scope
+
+Yang sudah terwujud dalam prototype saat ini:
+
+- dashboard queue operator,
+- multi-file picker untuk staging upload,
+- job list interaktif,
+- action `Start` per file,
+- action `Start All`,
+- active job context,
+- tab detail `Pages`, `Compare`, `Output`, `Logs`,
+- runtime status panel untuk konfigurasi LLM,
+- internal route draft untuk upload/start/start-all.
+
+Yang masih mock atau draft:
+
+- persistence job bersama,
+- queue worker nyata,
+- render PDF ke image nyata,
+- OCR nyata,
+- vision extraction nyata,
+- output aggregation nyata.
+
+## 10. Core Workflow
 
 1. User mengunggah satu atau banyak file PDF.
 2. Sistem membuat satu `FileJob` untuk setiap file.
@@ -90,9 +116,9 @@ Pengguna menghadapi beberapa masalah utama saat mengekstrak isi PDF:
 10. Sistem mengagregasi hasil halaman menjadi output final file.
 11. User dapat preview, melihat log, retry, dan download hasil akhir.
 
-## 10. Pipeline Design
+## 11. Pipeline Design
 
-### 10.1 File-Level Pipeline
+### 11.1 File-Level Pipeline
 
 - `uploaded`
 - `ready`
@@ -103,14 +129,14 @@ Pengguna menghadapi beberapa masalah utama saat mengekstrak isi PDF:
 - `aggregating_output`
 - `completed`
 
-### 10.2 Error and Partial States
+### 11.2 Error and Partial States
 
 - `failed_render`
 - `failed_extraction`
 - `partial_success`
 - `cancelled`
 
-### 10.3 Page-Level Lifecycle
+### 11.3 Page-Level Lifecycle
 
 - `pending`
 - `rendering`
@@ -119,7 +145,7 @@ Pengguna menghadapi beberapa masalah utama saat mengekstrak isi PDF:
 - `completed`
 - `failed`
 
-### 10.4 Engine Task Lifecycle
+### 11.4 Engine Task Lifecycle
 
 - `pending`
 - `running`
@@ -127,9 +153,9 @@ Pengguna menghadapi beberapa masalah utama saat mengekstrak isi PDF:
 - `failed`
 - `skipped`
 
-## 11. Queue Strategy
+## 12. Queue Strategy
 
-### 11.1 Queue Granularity
+### 12.1 Queue Granularity
 
 Queue berjalan di level halaman, bukan di level file. Pendekatan ini memungkinkan:
 
@@ -138,30 +164,30 @@ Queue berjalan di level halaman, bukan di level file. Pendekatan ini memungkinka
 - distribusi worker yang lebih efisien,
 - visibilitas bottleneck yang lebih jelas.
 
-### 11.2 Worker Types
+### 12.2 Worker Types
 
 - PDF render worker
 - Tesseract OCR worker
 - Vision LLM worker
 - Aggregation and export worker
 
-### 11.3 Concurrency Recommendation
+### 12.3 Concurrency Recommendation
 
 - Render PDF: `1-2` worker
 - Tesseract OCR: `3-5` worker
 - LLM vision: `1-3` worker tergantung rate limit
 
-## 12. PDF to Image Strategy
+## 13. PDF to Image Strategy
 
 Untuk kebutuhan pipeline produksi, rendering PDF ke gambar sebaiknya berjalan di backend atau worker, bukan di browser.
 
-### 12.1 Recommended Direction
+### 13.1 Recommended Direction
 
 - Next.js digunakan untuk dashboard dan orchestration UI.
 - PDF-to-image dilakukan di worker/backend.
 - Hasil image per halaman disimpan untuk dipakai ulang oleh OCR dan compare view.
 
-### 12.2 Technical Options
+### 13.2 Technical Options
 
 #### Option A - `pdfjs-dist`
 
@@ -202,30 +228,30 @@ Kekurangan:
 - bergantung pada binary sistem,
 - setup environment lebih berat daripada solusi pure npm.
 
-### 12.3 Product Recommendation
+### 13.3 Product Recommendation
 
 - Gunakan `pdfjs-dist` untuk preview dan kemungkinan fallback pure JavaScript.
 - Prioritaskan `pdftoppm` atau tool sekelas Poppler untuk pipeline render di worker production.
 
-## 13. Extraction Modes
+## 14. Extraction Modes
 
-### 13.1 LLM Only
+### 14.1 LLM Only
 
 - setiap image halaman dikirim ke vision model via OpenAI-like API,
 - cocok untuk layout kompleks, dokumen semi-terstruktur, atau scan sulit.
 
-### 13.2 Tesseract Only
+### 14.2 Tesseract Only
 
 - setiap image diproses lokal dengan Tesseract,
 - cocok untuk kebutuhan murah, cepat, dan sederhana.
 
-### 13.3 Both and Compare
+### 14.3 Both and Compare
 
 - kedua engine dijalankan pada halaman yang sama,
 - hasil disimpan terpisah,
 - UI menampilkan perbandingan agar user dapat mengevaluasi kualitas.
 
-### 13.4 Future Fallback Mode
+### 14.4 Future Fallback Mode
 
 Fitur lanjutan yang direkomendasikan:
 
@@ -233,14 +259,14 @@ Fitur lanjutan yang direkomendasikan:
 - jika hasil buruk atau confidence rendah, task LLM dibuat sebagai fallback,
 - sistem menghemat biaya tanpa mengorbankan kualitas pada dokumen sulit.
 
-## 14. Output Requirements
+## 15. Output Requirements
 
-### 14.1 Supported Formats
+### 15.1 Supported Formats
 
 - `.md`
 - `.txt`
 
-### 14.2 Output Structure
+### 15.2 Output Structure
 
 Markdown:
 
@@ -268,7 +294,7 @@ Plain text:
 <hasil ekstraksi>
 ```
 
-### 14.3 Output Rules
+### 15.3 Output Rules
 
 - normalisasi whitespace,
 - separator per halaman,
@@ -276,20 +302,20 @@ Plain text:
 - simpan partial output jika ada halaman gagal,
 - jika mode compare aktif, simpan raw result per engine untuk inspeksi.
 
-## 15. UI Requirements
+## 16. UI Requirements
 
-### 15.1 Main Screens
+### 16.1 Main Screens
 
 1. Dashboard utama
 2. Job detail view
 3. Output preview panel
 4. Logs or diagnostics panel
 
-### 15.2 Dashboard Requirements
+### 16.2 Dashboard Requirements
 
 Dashboard harus menampilkan:
 
-- upload area dengan drag-and-drop,
+- upload area dengan drag-and-drop atau file picker,
 - multiple file selection,
 - engine selector,
 - output selector,
@@ -299,7 +325,7 @@ Dashboard harus menampilkan:
 - progress bar,
 - quick action per file.
 
-### 15.3 Job List Columns
+### 16.3 Job List Columns
 
 Kolom minimum:
 
@@ -319,7 +345,7 @@ Actions minimum:
 - `Retry`
 - `Download`
 
-### 15.4 Job Detail Requirements
+### 16.4 Job Detail Requirements
 
 Job detail harus menampilkan:
 
@@ -339,7 +365,7 @@ Suggested tabs:
 - `Output`
 - `Logs`
 
-## 16. Error Handling Requirements
+## 17. Error Handling Requirements
 
 Sistem harus menampilkan error yang spesifik dan actionable.
 
@@ -359,9 +385,9 @@ Required actions:
 - rerun dengan engine berbeda,
 - download partial result.
 
-## 17. Conceptual Data Model
+## 18. Conceptual Data Model
 
-### 17.1 FileJob
+### 18.1 FileJob
 
 - `id`
 - `filename`
@@ -373,7 +399,7 @@ Required actions:
 - `created_at`
 - `updated_at`
 
-### 17.2 PageImage
+### 18.2 PageImage
 
 - `id`
 - `file_job_id`
@@ -381,7 +407,7 @@ Required actions:
 - `image_path`
 - `render_status`
 
-### 17.3 ExtractionTask
+### 18.3 ExtractionTask
 
 - `id`
 - `page_image_id`
@@ -391,7 +417,7 @@ Required actions:
 - `started_at`
 - `finished_at`
 
-### 17.4 ExtractionResult
+### 18.4 ExtractionResult
 
 - `id`
 - `extraction_task_id`
@@ -399,7 +425,7 @@ Required actions:
 - `normalized_text`
 - `format`
 
-### 17.5 FinalOutput
+### 18.5 FinalOutput
 
 - `id`
 - `file_job_id`
@@ -407,23 +433,37 @@ Required actions:
 - `text_content`
 - `compare_summary`
 
-## 18. Draft API Surface
+## 19. Internal API Draft
 
-- `POST /jobs/upload`
-- `GET /jobs`
-- `GET /jobs/:id`
-- `POST /jobs/:id/start`
-- `POST /jobs/start-all`
-- `POST /jobs/:id/retry`
-- `POST /pages/:id/retry`
-- `GET /jobs/:id/output`
-- `GET /jobs/:id/logs`
+Route yang sudah ada di prototype saat ini:
 
-Optional realtime endpoint:
+- `GET /api/config/llm`
+- `POST /api/jobs/upload`
+- `POST /api/jobs/start`
+- `POST /api/jobs/start-all`
 
-- `GET /events` via SSE
+Route yang masih dibutuhkan berikutnya:
 
-## 19. Technical Stack Snapshot
+- `GET /api/jobs`
+- `GET /api/jobs/:id`
+- `POST /api/jobs/:id/retry`
+- `POST /api/pages/:id/retry`
+- `GET /api/jobs/:id/output`
+- `GET /api/jobs/:id/logs`
+
+## 20. Runtime Configuration Requirements
+
+Konfigurasi runtime sensitif dibaca server-side. Dashboard hanya menerima status aman untuk kebutuhan observability setup.
+
+Env yang saat ini menjadi baseline:
+
+- `LLM_API_KEY`
+- `LLM_BASE_URL`
+- `LLM_MODEL`
+- `LLM_REASONING_EFFORT`
+- `EXAMPLE_PDF_PATH_TO_EXTRACT`
+
+## 21. Technical Stack Snapshot
 
 Current repository baseline:
 
@@ -437,13 +477,14 @@ Current repository baseline:
 
 Planned additions for implementation:
 
+- shared persistence untuk dev/runtime,
 - worker runtime untuk render dan extraction,
 - queue provider atau internal job orchestration,
 - OCR runtime,
 - OpenAI-like vision client,
 - storage untuk uploaded PDF, page images, dan outputs.
 
-## 20. MVP Definition
+## 22. MVP Definition
 
 MVP mencakup:
 
@@ -458,7 +499,7 @@ MVP mencakup:
 - output preview dan download,
 - log error sederhana.
 
-## 21. Suggested Phase Plan
+## 23. Suggested Phase Plan
 
 ### Phase 1
 
@@ -470,22 +511,23 @@ MVP mencakup:
 
 - tambahkan upload flow dan state management,
 - siapkan model data dan API contract,
-- hubungkan dashboard ke data source internal.
+- hubungkan dashboard ke internal route.
 
 ### Phase 3
 
+- tambahkan persistence shared,
 - implement render worker PDF-to-image,
 - implement queue task per halaman,
 - integrasikan Tesseract dan endpoint OpenAI-like.
 
 ### Phase 4
 
-- implement compare flow,
+- implement compare flow berbasis hasil nyata,
 - output aggregation,
 - retry granular,
 - observability dan logs.
 
-## 22. Success Metrics
+## 24. Success Metrics
 
 - User dapat memproses banyak file dalam satu workflow tanpa kebingungan.
 - User dapat mengidentifikasi file atau halaman yang gagal dalam hitungan detik dari dashboard.
@@ -493,7 +535,7 @@ MVP mencakup:
 - User dapat membandingkan hasil LLM dan Tesseract pada mode compare.
 - Pipeline status dapat dipantau secara real-time atau near real-time.
 
-## 23. Open Questions
+## 25. Open Questions
 
 - Apakah output perlu mendukung pemilihan `.md` dan `.txt` sekaligus pada MVP?
 - Apakah compare mode cukup side-by-side atau perlu diff viewer penuh?
