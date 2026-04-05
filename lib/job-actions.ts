@@ -15,6 +15,7 @@ import {
   getUploadedFileByJobId,
   getJobsState,
   getWorkerDiagnosticsState,
+  runPreparedJobsOnce,
   reserveNextJobId,
   retryPageById,
   retryJobById,
@@ -114,6 +115,13 @@ export type WorkerDiagnosticsResponse = {
   }
 }
 
+export type RunWorkersResponse = {
+  processedJobs: Array<{
+    job: JobRecord
+    detail: JobDetail
+  }>
+}
+
 export type GetJobLogsResponse = {
   jobId: string
   title: string
@@ -165,6 +173,10 @@ export function getJobs(): GetJobsResponse {
 
 export function getWorkerDiagnostics(): WorkerDiagnosticsResponse {
   return getWorkerDiagnosticsState()
+}
+
+export function runWorkers(): RunWorkersResponse {
+  return runPreparedJobsOnce()
 }
 
 export function getJob(jobId: string): GetJobResponse | null {

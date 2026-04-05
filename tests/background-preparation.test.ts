@@ -4,6 +4,7 @@ import test from "node:test"
 import { createJobDetail } from "@/lib/dashboard-data"
 import { getJob, getJobs } from "@/lib/job-actions"
 import { GET as getWorkersRoute } from "@/app/api/workers/route"
+import { POST as runWorkersRoute } from "@/app/api/workers/run/route"
 import { resetJobStoreForTests } from "@/lib/job-store"
 
 test.beforeEach(() => {
@@ -69,4 +70,17 @@ test("worker diagnostics groups prepared jobs by queue lane", async () => {
     ),
     true
   )
+})
+
+test("worker run route consumes prepared jobs once", async () => {
+  const response = await runWorkersRoute()
+  const payload = await response.json()
+  const refreshedJob = getJob("job-2")
+
+  assert.equal(response.status, 200)
+  assert.ok(payload.processedJobs.length > 0)
+  assert.ok(refreshedJob)
+  assert.equal(refreshedJob.job.status, "Processing")
+  assert.match(refreshedJob.detail.events[0] ?? "", /^Worker tick consumed /)
+  assert.match(refreshedJob.detail.outputPreview.markdown, /Worker output/)
 })

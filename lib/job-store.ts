@@ -97,6 +97,13 @@ type JobMutation = {
   detail: JobDetail
 }
 
+type WorkerRunMutation = {
+  processedJobs: Array<{
+    job: JobRecord
+    detail: JobDetail
+  }>
+}
+
 type JobRow = {
   id: string
   name: string
@@ -377,6 +384,126 @@ function countPendingPages(detail: Pick<JobDetail, "pages">) {
   return detail.pages.filter(
     (page) => page.status === "Waiting" || page.status === "Extracting"
   ).length
+}
+
+function buildWorkerProcessedPreview(job: JobRecord, detail: JobDetail) {
+  const completedPages = detail.pages.filter(
+    (page) => page.status === "Compared"
+  )
+  const pageSummary = completedPages
+    .slice(0, 3)
+    .map((page) => `- ${page.page}: extracted by worker lane`)
+    .join("\n")
+
+  return {
+    markdown: `# ${job.name}\n\n## Worker output\n${pageSummary || "- No completed pages yet"}\n`,
+    text: `${job.name}\n\nWorker output\n${
+      completedPages
+        .slice(0, 3)
+        .map((page) => `${page.page}: extracted by worker lane`)
+        .join("\n") || "No completed pages yet"
+    }`,
+  }
+}
+
+function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
+  const nextPages = detail.pages.map((page, index) => {
+    if (index === 0) {
+      return {
+        ...page,
+        llm: job.mode === "Tesseract only" ? page.llm : "Done",
+        tesseract: job.mode === "LLM only" ? page.tesseract : "Done",
+        status: "Compared" as const,
+        note: `${page.page} selesai diproses mock worker dan hasil parsial sudah masuk output`,
+      }
+    }
+
+    if (index === 1 && page.status === "Waiting") {
+      return {
+        ...page,
+        llm: job.mode === "Tesseract only" ? page.llm : "Running",
+        tesseract: job.mode === "LLM only" ? page.tesseract : "Running",
+        status: "Extracting" as const,
+        note: `${page.page} sedang diproses worker lane aktif`,
+      }
+    }
+
+    return { ...page }
+  })
+
+  const comparedPages = nextPages.filter(
+    (page) => page.status === "Compared"
+  ).length
+  const nextJob: JobRecord = {
+    ...job,
+    status: comparedPages >= job.pages ? "Completed" : "Processing",
+    progress: Math.min(Math.max(job.progress, 35) + 20, 100),
+    rendered: Math.max(job.rendered, job.pages),
+    extracted: Math.max(job.extracted, comparedPages),
+  }
+
+  const nextDetail: JobDetail = {
+    ...detail,
+    background: buildBackgroundState(nextJob, detail.background.preparedAt),
+    subtitle: `${nextJob.mode} extraction advancing through mock worker runtime`,
+    compareSummary:
+      nextJob.mode === "Both compare"
+        ? `${comparedPages} halaman sudah selesai dibandingkan oleh worker runtime mock`
+        : `${comparedPages} halaman sudah diproses worker runtime mock pada lane aktif`,
+    pages: nextPages,
+    events: [`Worker tick consumed ${nextJob.name}`, ...detail.events].slice(
+      0,
+      12
+    ),
+    outputPreview: buildWorkerProcessedPreview(nextJob, {
+      ...detail,
+      pages: nextPages,
+    }),
+    pipeline: detail.pipeline.map((step, index) => {
+      if (index === 2) {
+        return {
+          ...step,
+          title:
+            nextJob.status === "Completed"
+              ? "Extraction queue drained"
+              : "Extraction queue running",
+          detail:
+            nextJob.status === "Completed"
+              ? "Mock worker menyelesaikan seluruh halaman yang siap diproses"
+              : "Mock worker sedang memproses halaman berikutnya dari queue background",
+          state:
+            nextJob.status === "Completed"
+              ? ("done" as const)
+              : ("active" as const),
+        }
+      }
+
+      if (index === 3) {
+        return {
+          ...step,
+          title:
+            nextJob.status === "Completed"
+              ? "Output aggregation ready"
+              : "Output aggregation warming up",
+          detail:
+            nextJob.status === "Completed"
+              ? "Preview output sudah terisi dari hasil worker runtime mock"
+              : "Preview output diperbarui setiap worker tick selesai",
+          state:
+            nextJob.status === "Completed"
+              ? ("done" as const)
+              : ("active" as const),
+        }
+      }
+
+      return step
+    }),
+  }
+
+  return {
+    job: nextJob,
+    detail: nextDetail,
+  }
 }
 
 function writeNormalizedDetail(
@@ -1480,6 +1607,39 @@ export function getWorkerDiagnosticsState(): WorkerDiagnosticsState {
         pendingPages: 0,
       }
     ),
+  }
+}
+
+export function runPreparedJobsOnce(): WorkerRunMutation {
+  const db = getDatabase()
+  const state = readStateFromDatabase(db)
+  const processedJobs = state.jobs
+    .map((job) => {
+      const detail = state.details[job.id]
+
+      if (!detail?.background || detail.background.status !== "prepared") {
+        return null
+      }
+
+      if (job.status !== "Queued" && job.status !== "Processing") {
+        return null
+      }
+
+      return applyWorkerRun(job, detail)
+    })
+    .filter((mutation): mutation is JobMutation => mutation !== null)
+
+  withTransaction(db, () => {
+    processedJobs.forEach((mutation) => {
+      updateStoredJob(db, mutation)
+    })
+  })
+
+  return {
+    processedJobs: processedJobs.map((mutation) => ({
+      job: { ...mutation.job },
+      detail: structuredClone(mutation.detail),
+    })),
   }
 }
 
