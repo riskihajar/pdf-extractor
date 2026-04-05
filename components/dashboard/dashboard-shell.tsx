@@ -907,6 +907,23 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                             {task.status}
                           </span>
                         </div>
+                        {task.previewUrl ? (
+                          <div className="mt-4 overflow-hidden rounded-[1.15rem] border border-white/10 bg-stone-950/70">
+                            <div className="border-b border-white/10 px-3 py-2">
+                              <p className="text-[11px] tracking-[0.22em] text-stone-500 uppercase">
+                                Render preview
+                              </p>
+                            </div>
+                            <div className="bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.16),_transparent_48%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0))] p-3">
+                              <img
+                                src={task.previewUrl}
+                                alt={`${task.page} rendered preview`}
+                                className="h-auto w-full rounded-[0.9rem] border border-white/10 bg-white object-contain shadow-[0_18px_45px_rgba(0,0,0,0.35)]"
+                                loading="lazy"
+                              />
+                            </div>
+                          </div>
+                        ) : null}
                         <div className="mt-3 flex flex-wrap gap-2 text-xs">
                           <EnginePill name="LLM" state={task.llm} />
                           <EnginePill name="Tesseract" state={task.tesseract} />

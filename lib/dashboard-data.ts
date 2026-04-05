@@ -29,6 +29,7 @@ export type PageTask = {
   canRetry?: boolean
   page: string
   imagePath?: string
+  previewUrl?: string
   llm: EngineState
   tesseract: EngineState
   status: PageStatus

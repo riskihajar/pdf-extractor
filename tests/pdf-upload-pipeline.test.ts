@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises"
 import test from "node:test"
 
 import { POST as uploadJobsRoute } from "@/app/api/jobs/upload/route"
-import { getJob } from "@/lib/job-actions"
+import { getJob, getJobPages } from "@/lib/job-actions"
 import {
   getJobPagesById,
   getJobStoreSchemaVersion,
@@ -11,36 +11,7 @@ import {
   getUploadedFileByJobId,
   resetJobStoreForTests,
 } from "@/lib/job-store"
-
-function buildPdfBuffer(text: string) {
-  const stream = `BT\n/F1 24 Tf\n72 96 Td\n(${text}) Tj\nET`
-  const objects = [
-    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj",
-    `4 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj`,
-    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj",
-  ]
-
-  let pdf = "%PDF-1.4\n"
-  const offsets = [0]
-
-  for (const object of objects) {
-    offsets.push(Buffer.byteLength(pdf, "utf8"))
-    pdf += `${object}\n`
-  }
-
-  const xrefOffset = Buffer.byteLength(pdf, "utf8")
-  pdf += `xref\n0 ${objects.length + 1}\n`
-  pdf += "0000000000 65535 f \n"
-  offsets.slice(1).forEach((offset) => {
-    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`
-  })
-  pdf += `trailer\n<< /Root 1 0 R /Size ${objects.length + 1} >>\n`
-  pdf += `startxref\n${xrefOffset}\n%%EOF\n`
-
-  return Buffer.from(pdf, "utf8")
-}
+import { buildPdfBuffer } from "./helpers/pdf"
 
 test.beforeEach(() => {
   resetJobStoreForTests()
@@ -73,6 +44,7 @@ test("multipart upload stores PDF metadata and render artifacts", async () => {
   const storedFile = getUploadedFileByJobId(uploadedJob.id)
   const artifacts = getRenderArtifactsByJobId(uploadedJob.id)
   const pages = getJobPagesById(uploadedJob.id)
+  const pagesPayload = getJobPages(uploadedJob.id)
   const job = getJob(uploadedJob.id)
 
   assert.ok(storedFile)
@@ -84,8 +56,13 @@ test("multipart upload stores PDF metadata and render artifacts", async () => {
   assert.ok(pages)
   assert.equal(pages.pages[0]?.imagePath, artifacts[0]!.imagePath)
   assert.match(pages.pages[0]?.note ?? "", /Rendered image ready/)
+  assert.ok(pagesPayload)
   assert.ok(job?.uploadedFile)
   assert.equal(job?.renderArtifacts?.length, 1)
+  assert.equal(
+    pagesPayload?.pages[0]?.previewUrl,
+    `/api/pages/${encodeURIComponent(pages.pages[0]!.id!)}/preview`
+  )
 })
 
 test("start flow advances a real uploaded PDF job into processing", async () => {

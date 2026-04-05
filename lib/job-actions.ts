@@ -21,6 +21,7 @@ import {
   startAllStoredJobs,
   startJobById,
 } from "@/lib/job-store"
+import { attachPagePreviewUrl } from "@/lib/page-preview"
 import { preparePdfPipeline } from "@/lib/pdf-pipeline"
 import { storeUploadedPdf } from "@/lib/pdf-storage"
 
@@ -205,7 +206,16 @@ export function getJobOutput(jobId: string): GetJobOutputResponse | null {
 }
 
 export function getJobPages(jobId: string): GetJobPagesResponse | null {
-  return getJobPagesById(jobId)
+  const pages = getJobPagesById(jobId)
+
+  if (!pages) {
+    return null
+  }
+
+  return {
+    ...pages,
+    pages: pages.pages.map(attachPagePreviewUrl),
+  }
 }
 
 export function getJobRefresh(jobId: string): GetJobRefreshResponse | null {

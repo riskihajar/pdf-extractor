@@ -5,6 +5,7 @@ import { GET as getJobRoute } from "@/app/api/jobs/[id]/route"
 import { GET as getJobLogsRoute } from "@/app/api/jobs/[id]/logs/route"
 import { GET as getJobOutputRoute } from "@/app/api/jobs/[id]/output/route"
 import { GET as getJobPagesRoute } from "@/app/api/jobs/[id]/pages/route"
+import { GET as getPagePreviewRoute } from "@/app/api/pages/[id]/preview/route"
 import { POST as retryJobRoute } from "@/app/api/jobs/[id]/retry/route"
 import { POST as retryPageRoute } from "@/app/api/pages/[id]/retry/route"
 import { GET as getJobsRoute } from "@/app/api/jobs/route"
@@ -12,6 +13,8 @@ import { POST as startAllJobsRoute } from "@/app/api/jobs/start-all/route"
 import { POST as startJobRoute } from "@/app/api/jobs/start/route"
 import { POST as uploadJobsRoute } from "@/app/api/jobs/upload/route"
 import { resetJobStoreForTests } from "@/lib/job-store"
+
+import { buildPdfBuffer } from "./helpers/pdf"
 
 test.beforeEach(() => {
   resetJobStoreForTests()
@@ -71,6 +74,70 @@ test("GET /api/jobs/:id/pages returns granular pages payload", async () => {
   assert.equal(payload.pages[2]?.status, "Needs review")
   assert.equal(payload.pages[2]?.canRetry, true)
   assert.equal(payload.pages[0]?.canRetry, false)
+  assert.equal(payload.pages[0]?.previewUrl, undefined)
+})
+
+test("GET /api/pages/:id/preview returns rendered PNG bytes for uploaded pages", async () => {
+  const file = new File([buildPdfBuffer("Preview Route")], "previewable.pdf", {
+    type: "application/pdf",
+  })
+  const formData = new FormData()
+  formData.set("mode", "LLM only")
+  formData.set("output", "Markdown")
+  formData.append("files", file)
+
+  const uploadResponse = await uploadJobsRoute(
+    new Request("http://localhost/api/jobs/upload", {
+      method: "POST",
+      body: formData,
+    })
+  )
+  const uploadPayload = await uploadResponse.json()
+  const uploadedJob = uploadPayload.jobs.find(
+    (job: { name: string }) => job.name === "previewable.pdf"
+  )
+
+  assert.ok(uploadedJob)
+
+  const pagesResponse = await getJobPagesRoute(
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/pages`),
+    {
+      params: Promise.resolve({ id: uploadedJob.id }),
+    }
+  )
+  const pagesPayload = await pagesResponse.json()
+  const previewUrl = pagesPayload.pages[0]?.previewUrl
+
+  assert.equal(pagesResponse.status, 200)
+  assert.ok(previewUrl)
+
+  const previewResponse = await getPagePreviewRoute(
+    new Request(`http://localhost${previewUrl}`),
+    {
+      params: Promise.resolve({ id: pagesPayload.pages[0].id }),
+    }
+  )
+  const previewBytes = new Uint8Array(await previewResponse.arrayBuffer())
+
+  assert.equal(previewResponse.status, 200)
+  assert.equal(previewResponse.headers.get("content-type"), "image/png")
+  assert.deepEqual(
+    Array.from(previewBytes.subarray(0, 8)),
+    [137, 80, 78, 71, 13, 10, 26, 10]
+  )
+})
+
+test("GET /api/pages/:id/preview returns 404 when preview is unavailable", async () => {
+  const response = await getPagePreviewRoute(
+    new Request("http://localhost/api/pages/job-1:page-01/preview"),
+    {
+      params: Promise.resolve({ id: "job-1:page-01" }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 404)
+  assert.equal(payload.message, "Page preview not found")
 })
 
 test("GET /api/jobs/:id/logs returns normalized job logs", async () => {
