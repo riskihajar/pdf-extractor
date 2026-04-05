@@ -105,6 +105,7 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   const [workerDiagnostics, setWorkerDiagnostics] =
     useState<WorkerDiagnostics | null>(null)
   const [isDetailSyncing, setIsDetailSyncing] = useState(false)
+  const [isRunningWorkerTick, setIsRunningWorkerTick] = useState(false)
 
   const updateJobPages = useCallback(
     (jobId: string, pagesPayload: GetJobPagesResponse) => {
@@ -235,6 +236,31 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     [updateJobPages]
   )
 
+  const refreshJobsSnapshot = useCallback(async () => {
+    const response = await fetch("/api/jobs", { cache: "no-store" })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const payload = (await response.json()) as GetJobsResponse
+    setJobs(payload.jobs)
+    setJobDetails(payload.details)
+    return payload
+  }, [])
+
+  const refreshWorkerDiagnostics = useCallback(async () => {
+    const response = await fetch("/api/workers", { cache: "no-store" })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const payload = (await response.json()) as WorkerDiagnostics
+    setWorkerDiagnostics(payload)
+    return payload
+  }, [])
+
   useEffect(() => {
     let ignore = false
 
@@ -276,15 +302,9 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
 
     async function loadWorkerDiagnostics() {
       try {
-        const response = await fetch("/api/workers", { cache: "no-store" })
+        const payload = await refreshWorkerDiagnostics()
 
-        if (!response.ok) {
-          return
-        }
-
-        const payload = (await response.json()) as WorkerDiagnostics
-
-        if (!ignore) {
+        if (!ignore && payload) {
           setWorkerDiagnostics(payload)
         }
       } catch {
@@ -299,7 +319,7 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [refreshWorkerDiagnostics])
 
   useEffect(() => {
     if (!activeJob) {
@@ -536,6 +556,29 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     setActiveTab("Pages")
   }
 
+  async function handleWorkerTick() {
+    setIsRunningWorkerTick(true)
+
+    try {
+      const response = await fetch("/api/workers/run", {
+        method: "POST",
+      })
+
+      if (!response.ok) {
+        return
+      }
+
+      await Promise.all([refreshJobsSnapshot(), refreshWorkerDiagnostics()])
+
+      const nextActiveJobId = activeJobId || jobs[0]?.id
+      if (nextActiveJobId) {
+        setActiveJobId(nextActiveJobId)
+      }
+    } finally {
+      setIsRunningWorkerTick(false)
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,183,77,0.22),_transparent_32%),radial-gradient(circle_at_top_right,_rgba(83,109,254,0.18),_transparent_28%),linear-gradient(180deg,_#17120d_0%,_#120f0b_38%,_#0d0c0b_100%)] text-stone-50">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -563,6 +606,16 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                   onClick={handleStartAll}
                 >
                   Start all jobs
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-11 rounded-full border-cyan-300/20 bg-cyan-300/10 px-6 text-sm text-cyan-50 hover:bg-cyan-300/15"
+                  onClick={() => void handleWorkerTick()}
+                  disabled={isRunningWorkerTick}
+                >
+                  {isRunningWorkerTick
+                    ? "Running worker tick..."
+                    : "Run worker tick"}
                 </Button>
                 <Button
                   variant="outline"

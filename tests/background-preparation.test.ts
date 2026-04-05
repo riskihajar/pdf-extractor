@@ -2,6 +2,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { createJobDetail } from "@/lib/dashboard-data"
+import { POST as startJobRoute } from "@/app/api/jobs/start/route"
+import { POST as uploadJobsRoute } from "@/app/api/jobs/upload/route"
 import { getJob, getJobs } from "@/lib/job-actions"
 import { GET as getWorkersRoute } from "@/app/api/workers/route"
 import { POST as runWorkersRoute } from "@/app/api/workers/run/route"
@@ -81,6 +83,76 @@ test("worker run route consumes prepared jobs once", async () => {
   assert.ok(payload.processedJobs.length > 0)
   assert.ok(refreshedJob)
   assert.equal(refreshedJob.job.status, "Processing")
-  assert.match(refreshedJob.detail.events[0] ?? "", /^Worker tick consumed /)
+  assert.match(refreshedJob.detail.events[0] ?? "", /^\[extract-llm\] /)
+  assert.match(
+    refreshedJob.detail.events[1] ?? "",
+    /^Worker tick consumed .* via extract-llm with concurrency /
+  )
   assert.match(refreshedJob.detail.outputPreview.markdown, /Worker output/)
+})
+
+test("tesseract lane uses wider mock concurrency than compare lane", async () => {
+  await runWorkersRoute()
+
+  const compareJob = getJob("job-1")
+  const uploadResponse = await uploadJobsRoute(
+    new Request("http://localhost/api/jobs/upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        files: ["ocr-batch.pdf"],
+        mode: "Tesseract only",
+        output: "Text",
+      }),
+    })
+  )
+  const uploadPayload = await uploadResponse.json()
+  const uploadedOcrJob = uploadPayload.jobs.find(
+    (job: { mode: string }) => job.mode === "Tesseract only"
+  )
+
+  assert.ok(uploadedOcrJob)
+
+  await startJobRoute(
+    new Request("http://localhost/api/jobs/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jobId: uploadedOcrJob.id }),
+    })
+  )
+
+  await runWorkersRoute()
+
+  const ocrJob = getJob(uploadedOcrJob.id)
+
+  assert.ok(compareJob)
+  assert.ok(ocrJob)
+  assert.ok(
+    compareJob.detail.events.some((event) =>
+      /via extract-compare .*concurrency 1/.test(event)
+    )
+  )
+  assert.ok(
+    ocrJob.detail.events.some((event) =>
+      /via extract-ocr .*concurrency 2/.test(event)
+    )
+  )
+  assert.ok(
+    ocrJob.detail.events.some((event) =>
+      /^\[extract-ocr\] completed Page 01/.test(event)
+    )
+  )
+  assert.ok(
+    ocrJob.detail.events.some((event) =>
+      /^\[extract-ocr\] started Page 02/.test(event)
+    )
+  )
+  assert.equal(
+    ocrJob.detail.pages.filter((page) => page.status === "Extracting").length,
+    2
+  )
 })

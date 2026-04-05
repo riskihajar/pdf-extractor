@@ -406,25 +406,67 @@ function buildWorkerProcessedPreview(job: JobRecord, detail: JobDetail) {
   }
 }
 
+function getWorkerConcurrency(job: Pick<JobRecord, "mode">) {
+  if (job.mode === "Both compare") {
+    return 1
+  }
+
+  if (job.mode === "Tesseract only") {
+    return 2
+  }
+
+  return 1
+}
+
+function getWorkerLaneLabel(job: Pick<JobRecord, "mode">) {
+  if (job.mode === "Both compare") {
+    return "extract-compare"
+  }
+
+  if (job.mode === "Tesseract only") {
+    return "extract-ocr"
+  }
+
+  return "extract-llm"
+}
+
 function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
-  const nextPages = detail.pages.map((page, index) => {
-    if (index === 0) {
+  const concurrency = getWorkerConcurrency(job)
+  const lane = getWorkerLaneLabel(job)
+  let completedSlots = 0
+  let runningSlots = 0
+  const workerEvents: string[] = []
+
+  const nextPages = detail.pages.map((page) => {
+    if (page.status === "Compared") {
+      return { ...page }
+    }
+
+    if (page.status === "Extracting" && completedSlots < concurrency) {
+      completedSlots += 1
+      workerEvents.push(
+        `[${lane}] completed ${page.page} on slot ${completedSlots}/${concurrency}`
+      )
       return {
         ...page,
         llm: job.mode === "Tesseract only" ? page.llm : "Done",
         tesseract: job.mode === "LLM only" ? page.tesseract : "Done",
         status: "Compared" as const,
-        note: `${page.page} selesai diproses mock worker dan hasil parsial sudah masuk output`,
+        note: `${page.page} selesai diproses mock worker lane dan hasil parsial sudah masuk output`,
       }
     }
 
-    if (index === 1 && page.status === "Waiting") {
+    if (page.status === "Waiting" && runningSlots < concurrency) {
+      runningSlots += 1
+      workerEvents.push(
+        `[${lane}] started ${page.page} on slot ${runningSlots}/${concurrency}`
+      )
       return {
         ...page,
         llm: job.mode === "Tesseract only" ? page.llm : "Running",
         tesseract: job.mode === "LLM only" ? page.tesseract : "Running",
         status: "Extracting" as const,
-        note: `${page.page} sedang diproses worker lane aktif`,
+        note: `${page.page} sedang diproses worker lane aktif (slot ${runningSlots}/${concurrency})`,
       }
     }
 
@@ -449,12 +491,13 @@ function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
     compareSummary:
       nextJob.mode === "Both compare"
         ? `${comparedPages} halaman sudah selesai dibandingkan oleh worker runtime mock`
-        : `${comparedPages} halaman sudah diproses worker runtime mock pada lane aktif`,
+        : `${comparedPages} halaman sudah diproses worker runtime mock pada lane aktif dengan concurrency ${concurrency}`,
     pages: nextPages,
-    events: [`Worker tick consumed ${nextJob.name}`, ...detail.events].slice(
-      0,
-      12
-    ),
+    events: [
+      ...workerEvents,
+      `Worker tick consumed ${nextJob.name} via ${lane} with concurrency ${concurrency}`,
+      ...detail.events,
+    ].slice(0, 12),
     outputPreview: buildWorkerProcessedPreview(nextJob, {
       ...detail,
       pages: nextPages,
