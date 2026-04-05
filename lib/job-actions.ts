@@ -5,18 +5,24 @@ import type {
   OutputFormat,
 } from "@/lib/dashboard-data"
 import {
+  createUploadedJob,
   createJobs,
   getJobById,
   getJobLogsById,
   getJobOutputById,
   getJobPagesById,
+  getRenderArtifactsByJobId,
+  getUploadedFileByJobId,
   getJobsState,
+  reserveNextJobId,
   retryPageById,
   retryJobById,
   shouldAutoRefreshJobPages,
   startAllStoredJobs,
   startJobById,
 } from "@/lib/job-store"
+import { preparePdfPipeline } from "@/lib/pdf-pipeline"
+import { storeUploadedPdf } from "@/lib/pdf-storage"
 
 export type UploadJobsRequest = {
   files?: string[]
@@ -24,9 +30,27 @@ export type UploadJobsRequest = {
   output: OutputFormat
 }
 
+export type UploadedJobAsset = {
+  storageKey: string
+  storedPath: string
+  mimeType: string
+  sizeBytes: number
+  pageCount: number
+}
+
+export type RenderArtifact = {
+  pageId: string
+  position: number
+  imagePath: string
+}
+
 export type UploadJobsResponse = {
   jobs: JobRecord[]
   details: Record<string, JobDetail>
+  errors?: Array<{
+    fileName: string
+    message: string
+  }>
 }
 
 export type StartJobRequest = {
@@ -61,6 +85,8 @@ export type RetryPageResponse = {
 export type GetJobResponse = {
   job: JobRecord
   detail: JobDetail
+  uploadedFile?: UploadedJobAsset | null
+  renderArtifacts?: RenderArtifact[]
 }
 
 export type GetJobsResponse = {
@@ -118,7 +144,46 @@ export function getJobs(): GetJobsResponse {
 }
 
 export function getJob(jobId: string): GetJobResponse | null {
-  return getJobById(jobId)
+  const result = getJobById(jobId)
+
+  if (!result) {
+    return null
+  }
+
+  const uploadedFile = getUploadedFileByJobId(jobId)
+  const renderArtifacts = getRenderArtifactsByJobId(jobId)
+
+  return {
+    ...result,
+    uploadedFile: uploadedFile && {
+      storageKey: uploadedFile.storageKey,
+      storedPath: uploadedFile.storedPath,
+      mimeType: uploadedFile.mimeType,
+      sizeBytes: uploadedFile.sizeBytes,
+      pageCount: uploadedFile.pageCount,
+    },
+    renderArtifacts: renderArtifacts.map((artifact) => ({
+      pageId: artifact.pageId,
+      position: artifact.position,
+      imagePath: artifact.imagePath,
+    })),
+  }
+}
+
+export async function uploadPdfFile(
+  file: File,
+  mode: ExtractionMode,
+  output: OutputFormat
+) {
+  const stored = await storeUploadedPdf(file)
+  const jobId = reserveNextJobId()
+  const pipeline = await preparePdfPipeline(stored, mode, output, jobId)
+
+  return createUploadedJob({ pipeline })
+}
+
+export function getJobRenderArtifacts(jobId: string) {
+  return getRenderArtifactsByJobId(jobId)
 }
 
 export function retryJob({ jobId }: StartJobRequest): RetryJobResponse | null {

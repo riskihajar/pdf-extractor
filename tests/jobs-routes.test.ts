@@ -47,6 +47,8 @@ test("GET /api/jobs/:id returns a matching job", async () => {
   assert.equal(response.status, 200)
   assert.equal(payload.job.id, "job-1")
   assert.equal(payload.detail.title, "bank-statement-april.pdf")
+  assert.equal(payload.uploadedFile ?? null, null)
+  assert.deepEqual(payload.renderArtifacts ?? [], [])
   assert.equal(payload.pages.jobId, "job-1")
   assert.equal(payload.pages.canRetry, true)
   assert.equal(payload.pages.pages[2]?.id, "job-1:page-03")

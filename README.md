@@ -26,9 +26,11 @@ Yang sudah ada saat ini:
 - Tailwind CSS v4,
 - shadcn/ui base preset,
 - dashboard interaktif untuk queue operator,
-- file picker multi-upload untuk staging job,
+- file picker multi-upload untuk upload PDF nyata ke local dev storage,
 - tabs detail `Pages`, `Compare`, `Output`, `Logs`,
-- route internal draft untuk `upload`, `start`, `start-all`,
+- route internal untuk `upload`, `start`, `start-all`,
+- metadata upload + render artifacts tersimpan di SQLite dev store,
+- render pipeline nyata berbasis `pdftoppm` untuk menghasilkan PNG per halaman,
 - route internal aman untuk status runtime LLM,
 - helper server-side untuk membaca env lokal tanpa mengekspos secret ke UI,
 - dokumentasi produk dan tracking progres.
@@ -36,13 +38,13 @@ Yang sudah ada saat ini:
 Yang masih belum selesai:
 
 - persistence shared untuk state job,
-- worker render PDF ke image,
+- worker/background queue terpisah penuh,
 - queue runtime nyata,
 - integrasi Tesseract,
 - integrasi OpenAI-like vision API untuk extraction nyata,
 - export pipeline final,
 - detail compare berbasis hasil nyata,
-- penyimpanan file upload dan page images.
+- thumbnail image di UI.
 
 ## Product Workflow
 
@@ -115,7 +117,25 @@ Route internal yang sudah tersedia:
 - `POST /api/jobs/start`
 - `POST /api/jobs/start-all`
 
-Route ini masih draft dan saat ini dipakai untuk menyambungkan dashboard ke action layer internal sebelum ada persistence dan worker sungguhan.
+`POST /api/jobs/upload` sekarang menerima `multipart/form-data` untuk PDF nyata dari dashboard. File PDF disimpan ke `.data/storage/uploads`, halaman dirender ke `.data/storage/renders/<job-id>`, lalu metadata path/page count/artifact disimpan ke SQLite agar job bisa dilanjutkan oleh flow `Start` yang sudah ada.
+
+## Real Upload + Render Pipeline
+
+Vertical slice yang sekarang benar-benar jalan di local dev:
+
+- dashboard upload memilih file PDF asli dan mengirim binary via `multipart/form-data`,
+- server menyimpan file ke local storage dev,
+- intake pipeline membaca page count dan teks embedded ringan via `pdf-parse`,
+- halaman dirender ke PNG per page memakai `pdftoppm`,
+- SQLite menyimpan metadata upload dan artifact path per halaman,
+- job hasil upload bisa masuk ke flow `Start`/`Start All` yang sama,
+- detail `Pages` menampilkan path artifact render nyata per halaman.
+
+Catatan operasional:
+
+- implementasi ini menargetkan macOS/Homebrew dev setup dan default ke `/opt/homebrew/bin/pdftoppm`,
+- override path binary bisa dilakukan lewat env `PDFTOPPM_PATH`,
+- hasil render saat ini dipakai sebagai artifact yang bisa dilacak, belum ditampilkan sebagai thumbnail image di browser.
 
 ## Repository Structure
 

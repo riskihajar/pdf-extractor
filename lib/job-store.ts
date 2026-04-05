@@ -1,4 +1,4 @@
-import { mkdirSync, unlinkSync } from "node:fs"
+import { mkdirSync, rmSync, unlinkSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 
@@ -11,6 +11,7 @@ import {
   type JobRecord,
   type OutputFormat,
 } from "@/lib/dashboard-data"
+import type { PipelineResult, UploadedPdfMetadata } from "@/lib/pdf-pipeline"
 
 export type JobStoreState = {
   jobs: JobRecord[]
@@ -41,10 +42,31 @@ export type JobPagesPayload = {
   pages: JobDetail["pages"]
 }
 
+export type UploadedFileRecord = {
+  jobId: string
+  storageKey: string
+  originalName: string
+  storedPath: string
+  mimeType: string
+  sizeBytes: number
+  pageCount: number
+}
+
+export type RenderArtifactRecord = {
+  jobId: string
+  pageId: string
+  position: number
+  imagePath: string
+}
+
 type CreateJobsInput = {
   files?: string[]
   mode: ExtractionMode
   output: OutputFormat
+}
+
+type CreateUploadedJobInput = {
+  pipeline: PipelineResult
 }
 
 type UpdateJobInput = {
@@ -97,10 +119,28 @@ type JobPageRow = {
   page_id?: string | null
   position: number
   page_label: string
+  image_path?: string | null
   llm_state: JobDetail["pages"][number]["llm"]
   tesseract_state: JobDetail["pages"][number]["tesseract"]
   status: JobDetail["pages"][number]["status"]
   note: string
+}
+
+type UploadedFileRow = {
+  job_id: string
+  storage_key: string
+  original_name: string
+  stored_path: string
+  mime_type: string
+  size_bytes: number
+  page_count: number
+}
+
+type RenderArtifactRow = {
+  job_id: string
+  page_id: string
+  position: number
+  image_path: string
 }
 
 type SchemaVersionRow = {
@@ -134,7 +174,7 @@ type JobOutputRow = {
 const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH || join(JOB_STORE_DIR, "jobs.sqlite")
-const JOB_STORE_SCHEMA_VERSION = 3
+const JOB_STORE_SCHEMA_VERSION = 4
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -223,6 +263,8 @@ function normalizeDetail(job: JobRecord, detail?: JobDetail): JobDetail {
 
 function clearNormalizedTables(db: DatabaseSync, jobId?: string) {
   const clauses = [
+    "DELETE FROM uploaded_files",
+    "DELETE FROM render_artifacts",
     "DELETE FROM job_meta",
     "DELETE FROM job_events",
     "DELETE FROM job_pages",
@@ -285,13 +327,14 @@ function writeNormalizedDetail(
   normalized.pages.forEach((page, index) => {
     db.prepare(
       `INSERT INTO job_pages (
-        job_id, page_id, position, page_label, llm_state, tesseract_state, status, note
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        job_id, page_id, position, page_label, image_path, llm_state, tesseract_state, status, note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       job.id,
       buildPageId(job.id, index),
       index,
       page.page,
+      page.imagePath ?? null,
       page.llm,
       page.tesseract,
       page.status,
@@ -332,6 +375,41 @@ function writeNormalizedDetail(
   db.prepare(
     `INSERT OR REPLACE INTO job_details (job_id, payload) VALUES (?, ?)`
   ).run(job.id, JSON.stringify(normalized))
+}
+
+function writeUploadedFileMetadata(
+  db: DatabaseSync,
+  metadata: UploadedPdfMetadata,
+  jobId: string
+) {
+  db.prepare(
+    `INSERT OR REPLACE INTO uploaded_files (
+      job_id, storage_key, original_name, stored_path, mime_type, size_bytes, page_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    jobId,
+    metadata.storageKey,
+    metadata.originalName,
+    metadata.storedPath,
+    metadata.mimeType,
+    metadata.sizeBytes,
+    metadata.pageCount
+  )
+}
+
+function writeRenderArtifacts(db: DatabaseSync, pipeline: PipelineResult) {
+  pipeline.renderedPages.forEach((page, index) => {
+    db.prepare(
+      `INSERT OR REPLACE INTO render_artifacts (
+        job_id, page_id, position, image_path
+      ) VALUES (?, ?, ?, ?)`
+    ).run(
+      pipeline.job.id,
+      buildPageId(pipeline.job.id, index),
+      index,
+      page.imagePath
+    )
+  })
 }
 
 function readLegacyDetails(db: DatabaseSync) {
@@ -430,7 +508,7 @@ function applySchemaMigrations(db: DatabaseSync) {
 
   if (currentVersion < 1) {
     db.prepare(
-      `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(1, new Date().toISOString())
   }
 
@@ -452,8 +530,46 @@ function applySchemaMigrations(db: DatabaseSync) {
       `CREATE UNIQUE INDEX IF NOT EXISTS job_pages_page_id_idx ON job_pages(page_id)`
     )
     db.prepare(
-      `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(JOB_STORE_SCHEMA_VERSION, new Date().toISOString())
+  }
+
+  if (currentVersion < 4) {
+    const jobPageColumns = db
+      .prepare(`PRAGMA table_info(job_pages)`)
+      .all() as Array<{
+      name: string
+    }>
+
+    if (!jobPageColumns.some((column) => column.name === "image_path")) {
+      db.exec(`ALTER TABLE job_pages ADD COLUMN image_path TEXT`)
+    }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS uploaded_files (
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        storage_key TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        stored_path TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        page_count INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS render_artifacts (
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        page_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        image_path TEXT NOT NULL,
+        PRIMARY KEY (job_id, position)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS render_artifacts_page_id_idx ON render_artifacts(page_id);
+    `)
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(4, new Date().toISOString())
   }
 }
 
@@ -505,6 +621,7 @@ function initializeDatabase(db: DatabaseSync) {
       page_id TEXT,
       position INTEGER NOT NULL,
       page_label TEXT NOT NULL,
+      image_path TEXT,
       llm_state TEXT NOT NULL,
       tesseract_state TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -536,6 +653,24 @@ function initializeDatabase(db: DatabaseSync) {
       markdown TEXT NOT NULL,
       text TEXT NOT NULL,
       generated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS uploaded_files (
+      job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+      storage_key TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      page_count INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS render_artifacts (
+      job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      page_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      image_path TEXT NOT NULL,
+      PRIMARY KEY (job_id, position)
     );
   `)
 
@@ -649,6 +784,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
     detail.pages.push({
       id: row.page_id ?? buildPageId(row.job_id, row.position),
       page: row.page_label,
+      imagePath: row.image_path ?? undefined,
       llm: row.llm_state,
       tesseract: row.tesseract_state,
       status: row.status,
@@ -780,11 +916,14 @@ function createUploadJob(
 }
 
 function applyStart(job: JobRecord, detail?: JobDetail): JobMutation {
+  const nextRendered = Math.max(job.rendered, job.pages)
+  const nextExtracted = Math.max(job.extracted, Math.min(job.pages, 1))
   const nextJob: JobRecord = {
     ...job,
     status: "Processing",
     progress: Math.max(job.progress, 15),
-    rendered: Math.max(job.rendered, Math.min(job.pages, 2)),
+    rendered: nextRendered,
+    extracted: nextExtracted,
   }
 
   const baseDetail = detail ?? createJobDetail(nextJob)
@@ -796,6 +935,53 @@ function applyStart(job: JobRecord, detail?: JobDetail): JobMutation {
       title: nextJob.name,
       subtitle: `${nextJob.mode} extraction with ${nextJob.output.toLowerCase()} export preset`,
       events: [`Started ${nextJob.name}`, ...baseDetail.events].slice(0, 6),
+      compareSummary:
+        nextJob.mode === "Both compare"
+          ? `Rendered page artifacts are now feeding both extraction lanes for ${nextJob.pages} pages`
+          : `Rendered page artifacts are now feeding the selected extraction lane for ${nextJob.pages} pages`,
+      pages: baseDetail.pages.map((page, index) => ({
+        ...page,
+        llm:
+          nextJob.mode === "Tesseract only"
+            ? page.llm
+            : index === 0
+              ? "Running"
+              : "Queued",
+        tesseract:
+          nextJob.mode === "LLM only"
+            ? page.tesseract
+            : index === 0
+              ? "Running"
+              : "Queued",
+        status: index === 0 ? "Extracting" : "Waiting",
+        note:
+          page.imagePath && index === 0
+            ? `${page.page} render artifact connected to the live extraction queue`
+            : page.note,
+      })),
+      pipeline: baseDetail.pipeline.map((step, index) => {
+        if (index === 2) {
+          return {
+            ...step,
+            title: "Extraction queue running",
+            detail:
+              "Rendered page artifacts are now being consumed by the active extraction lanes",
+            state: "active" as const,
+          }
+        }
+
+        if (index === 3) {
+          return {
+            ...step,
+            title: "Output aggregation warming up",
+            detail:
+              "Preview output is tracking the first extracted page while the rest remain queued",
+            state: "pending" as const,
+          }
+        }
+
+        return step
+      }),
     },
   }
 }
@@ -1102,6 +1288,7 @@ export function getJobPagesById(jobId: string): JobPagesPayload | null {
   const pageRows = db
     .prepare(
       `SELECT job_id, page_id, position, page_label, llm_state, tesseract_state, status, note
+       , image_path
        FROM job_pages
        WHERE job_id = ?
        ORDER BY position ASC`
@@ -1117,6 +1304,7 @@ export function getJobPagesById(jobId: string): JobPagesPayload | null {
     pages: pageRows.map((row) => ({
       id: row.page_id ?? buildPageId(row.job_id, row.position),
       page: row.page_label,
+      imagePath: row.image_path ?? undefined,
       llm: row.llm_state,
       tesseract: row.tesseract_state,
       status: row.status,
@@ -1194,6 +1382,22 @@ export function createJobs({
   return getJobsState()
 }
 
+export function createUploadedJob({ pipeline }: CreateUploadedJobInput) {
+  const db = getDatabase()
+  const sortOrder = getJobsCount(db)
+
+  withTransaction(db, () => {
+    insertJob(db, pipeline.job, sortOrder, pipeline.detail)
+    writeUploadedFileMetadata(db, pipeline.metadata, pipeline.job.id)
+    writeRenderArtifacts(db, pipeline)
+  })
+
+  return {
+    job: pipeline.job,
+    detail: pipeline.detail,
+  }
+}
+
 export function startJobById({ jobId }: UpdateJobInput) {
   const db = getDatabase()
   const current = getJobById(jobId)
@@ -1209,6 +1413,56 @@ export function startJobById({ jobId }: UpdateJobInput) {
     job: { ...mutation.job },
     detail: structuredClone(mutation.detail),
   }
+}
+
+export function reserveNextJobId() {
+  return nextJobId(getDatabase())
+}
+
+export function getUploadedFileByJobId(
+  jobId: string
+): UploadedFileRecord | null {
+  const row = getDatabase()
+    .prepare(
+      `SELECT job_id, storage_key, original_name, stored_path, mime_type, size_bytes, page_count
+       FROM uploaded_files
+       WHERE job_id = ?`
+    )
+    .get(jobId) as UploadedFileRow | undefined
+
+  if (!row) {
+    return null
+  }
+
+  return {
+    jobId: row.job_id,
+    storageKey: row.storage_key,
+    originalName: row.original_name,
+    storedPath: row.stored_path,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    pageCount: row.page_count,
+  }
+}
+
+export function getRenderArtifactsByJobId(
+  jobId: string
+): RenderArtifactRecord[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT job_id, page_id, position, image_path
+       FROM render_artifacts
+       WHERE job_id = ?
+       ORDER BY position ASC`
+    )
+    .all(jobId) as RenderArtifactRow[]
+
+  return rows.map((row) => ({
+    jobId: row.job_id,
+    pageId: row.page_id,
+    position: row.position,
+    imagePath: row.image_path,
+  }))
 }
 
 export function startAllStoredJobs(): JobStoreState {
@@ -1241,8 +1495,9 @@ export function retryPageById({ pageId }: RetryPageInput) {
   const pageRow = db
     .prepare(
       `SELECT job_id, page_id, position, page_label, llm_state, tesseract_state, status, note
-       FROM job_pages
-       WHERE page_id = ?`
+       , image_path
+        FROM job_pages
+        WHERE page_id = ?`
     )
     .get(pageId) as JobPageRow | undefined
 
@@ -1277,6 +1532,16 @@ export function getJobStoreSchemaVersion() {
 export function resetJobStoreForTests() {
   globalStore.__pdfExtractorJobDatabase__?.close()
   globalStore.__pdfExtractorJobDatabase__ = undefined
+
+  rmSync(join(process.cwd(), ".data", "storage"), {
+    recursive: true,
+    force: true,
+  })
+
+  rmSync(join(process.cwd(), "sample"), {
+    recursive: true,
+    force: true,
+  })
 
   try {
     unlinkSync(JOB_STORE_PATH)

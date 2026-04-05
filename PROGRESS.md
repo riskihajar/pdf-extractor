@@ -44,9 +44,9 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan file picker multi-upload di UI
 - [x] Tampilkan file yang dipilih di intake panel
 - [x] Stage upload batch menjadi job UI
-- [~] Upload flow masih berbasis nama file dan internal draft API
-- [ ] Upload binary PDF nyata ke server
-- [ ] Validasi ukuran file, tipe file, dan error upload
+- [x] Upload flow fallback JSON tetap ada untuk synthetic batch/dev draft
+- [x] Upload binary PDF nyata ke server
+- [x] Validasi ukuran file, tipe file, dan error upload
 
 ## 5. Job Queue Interaction
 
@@ -118,11 +118,12 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 ## 10. PDF Processing Pipeline
 
 - [ ] Upload PDF nyata ke storage lokal/dev
-- [ ] Render PDF ke image per halaman
-- [ ] Simpan page image metadata
+- [x] Upload PDF nyata ke storage lokal/dev
+- [x] Render PDF ke image per halaman
+- [x] Simpan page image metadata
 - [ ] Tampilkan thumbnail / preview page image nyata
-- [ ] Pilih implementasi render utama (`pdfjs-dist` vs Poppler)
-- [ ] Siapkan worker/background processing untuk render
+- [x] Pilih implementasi render utama (`pdfjs-dist` vs Poppler)
+- [~] Siapkan worker/background processing untuk render
 
 ## 11. OCR and Vision Extraction
 
@@ -161,6 +162,8 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan test untuk endpoint payload halaman granular dan guard retryable page
 - [x] Tambahkan test untuk metadata `canRetry` dan helper rule auto-refresh tab `Pages`
 - [x] Tambahkan test integration-style ringan untuk wiring polling/refresh tab `Pages` tanpa browser stack tambahan
+- [x] Tambahkan test upload/render pipeline nyata untuk PDF lokal dev
+- [x] Tambahkan test validasi upload PDF multipart dan error terstruktur
 - [ ] Tambahkan smoke test untuk flow utama dashboard
 
 ## 15. Immediate Next Priorities
@@ -173,4 +176,4 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan test untuk endpoint/store logs dan output
 - [x] Tambahkan test untuk retry page-level dan schema version store
 - [x] Pindahkan route draft ke model state yang lebih konsisten
-- [ ] Mulai wiring upload PDF nyata dan render pipeline
+- [x] Mulai wiring upload PDF nyata dan render pipeline

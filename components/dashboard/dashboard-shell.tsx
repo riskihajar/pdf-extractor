@@ -61,6 +61,11 @@ type DashboardShellProps = {
   initialState: GetJobsResponse
 }
 
+type UploadIssue = {
+  fileName: string
+  message: string
+}
+
 type DetailTabSyncOptions = {
   forcePagesRefresh?: boolean
 }
@@ -78,7 +83,8 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     () => initialState.jobs[0]?.id ?? ""
   )
   const [activeTab, setActiveTab] = useState<DetailTab>("Pages")
-  const [pickedFiles, setPickedFiles] = useState<string[]>([])
+  const [pickedFiles, setPickedFiles] = useState<File[]>([])
+  const [uploadIssues, setUploadIssues] = useState<UploadIssue[]>([])
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null)
   const [isDetailSyncing, setIsDetailSyncing] = useState(false)
 
@@ -308,20 +314,41 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   }, [activeDetail, activeJob, activeTab, isDetailSyncing, updateJobPages])
 
   async function handleUploadBatch() {
-    const files = pickedFiles.length > 0 ? pickedFiles : []
-    const response = await fetch("/api/jobs/upload", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        files,
-        mode,
-        output,
-      }),
-    })
+    setUploadIssues([])
+
+    const response =
+      pickedFiles.length > 0
+        ? await (async () => {
+            const formData = new FormData()
+            formData.set("mode", mode)
+            formData.set("output", output)
+            pickedFiles.forEach((file) => {
+              formData.append("files", file)
+            })
+
+            return fetch("/api/jobs/upload", {
+              method: "POST",
+              body: formData,
+            })
+          })()
+        : await fetch("/api/jobs/upload", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              files: [],
+              mode,
+              output,
+            }),
+          })
 
     if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as {
+        errors?: UploadIssue[]
+      } | null
+
+      setUploadIssues(payload?.errors ?? [])
       return
     }
 
@@ -335,6 +362,7 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     setActiveJobId(payload.jobs[0]?.id ?? activeJobId)
     setActiveTab("Pages")
     setPickedFiles([])
+    setUploadIssues(payload.errors ?? [])
 
     if (inputRef.current) {
       inputRef.current.value = ""
@@ -346,8 +374,8 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
       return
     }
 
-    const names = Array.from(files).map((file) => file.name)
-    setPickedFiles(names)
+    setUploadIssues([])
+    setPickedFiles(Array.from(files))
   }
 
   async function handleStartAll() {
@@ -543,9 +571,9 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                     queue.
                   </h3>
                   <p className="mt-3 max-w-xl text-sm leading-6 text-stone-300">
-                    Each file becomes an independent job with start, retry,
-                    compare, and export actions. Every page becomes a queue item
-                    so one bad scan never blocks the rest of the batch.
+                    Each file becomes an independent job with its binary stored
+                    in local dev storage, real page renders generated up front,
+                    and page-level queue visibility before extraction starts.
                   </p>
                   <input
                     ref={inputRef}
@@ -577,16 +605,37 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                     <div className="mt-2 flex flex-wrap gap-2">
                       {pickedFiles.length > 0 ? (
                         pickedFiles.map((file) => (
-                          <FilterPill key={file} label={file} active />
+                          <FilterPill
+                            key={file.name}
+                            label={file.name}
+                            active
+                          />
                         ))
                       ) : (
                         <span className="text-xs text-stone-400">
-                          No local files selected yet. Use the picker or stage a
-                          synthetic batch.
+                          No local files selected yet. Choose PDFs to upload
+                          into local dev storage.
                         </span>
                       )}
                     </div>
                   </div>
+                  {uploadIssues.length > 0 ? (
+                    <div className="mt-3 rounded-[1.1rem] border border-rose-300/20 bg-rose-400/10 p-3">
+                      <p className="text-[11px] tracking-[0.2em] text-rose-100 uppercase">
+                        Upload validation
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        {uploadIssues.map((issue) => (
+                          <p
+                            key={`${issue.fileName}-${issue.message}`}
+                            className="text-xs text-rose-100/90"
+                          >
+                            {issue.fileName}: {issue.message}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-3 rounded-[1.4rem] border border-white/10 bg-black/15 p-4 sm:grid-cols-2">
@@ -843,6 +892,11 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                             <p className="mt-1 text-xs text-stone-400">
                               {task.note}
                             </p>
+                            {task.imagePath ? (
+                              <p className="mt-1 text-[11px] break-all text-stone-500">
+                                Render artifact: {task.imagePath}
+                              </p>
+                            ) : null}
                           </div>
                           <span
                             className={cn(

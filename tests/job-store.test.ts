@@ -28,6 +28,7 @@ test("startJob updates a stored job and detail", () => {
   assert.equal(result.job.id, "job-2")
   assert.equal(result.job.status, "Processing")
   assert.ok(result.job.progress >= 15)
+  assert.equal(result.job.rendered, result.job.pages)
   assert.match(result.detail.events[0], /^Started /)
 })
 
@@ -138,5 +139,5 @@ test("retryPage returns null for unknown page", () => {
 })
 
 test("job store exposes current schema version", () => {
-  assert.equal(getJobStoreSchemaVersion(), 3)
+  assert.equal(getJobStoreSchemaVersion(), 4)
 })
