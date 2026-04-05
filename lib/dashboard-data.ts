@@ -1,12 +1,18 @@
 export type ExtractionMode = "LLM only" | "Tesseract only" | "Both compare"
 export type OutputFormat = "Markdown" | "Text" | "MD + TXT"
-export type JobStatus = "Uploaded" | "Queued" | "Processing" | "Partial success" | "Completed"
+export type JobStatus =
+  | "Uploaded"
+  | "Queued"
+  | "Processing"
+  | "Partial success"
+  | "Completed"
 export type EngineState = "Ready" | "Queued" | "Running" | "Done" | "Failed"
 export type PageStatus = "Waiting" | "Extracting" | "Compared" | "Needs review"
 export type DetailTab = "Pages" | "Compare" | "Output" | "Logs"
 
 export type JobRecord = {
   id: string
+  canRetry?: boolean
   name: string
   pages: number
   mode: ExtractionMode
@@ -19,6 +25,8 @@ export type JobRecord = {
 }
 
 export type PageTask = {
+  id?: string
+  canRetry?: boolean
   page: string
   llm: EngineState
   tesseract: EngineState
@@ -191,7 +199,8 @@ export const initialJobDetails: Record<string, JobDetail> = {
   "job-1": {
     title: "bank-statement-april.pdf",
     subtitle: "Dual-engine compare mode with markdown and plain text export",
-    compareSummary: "9 pages aligned, 1 page flagged for OCR fallback, 2 pages still running",
+    compareSummary:
+      "9 pages aligned, 1 page flagged for OCR fallback, 2 pages still running",
     pages: bankPages,
     events: [
       "18:42 - Render worker finished all 12 pages for bank-statement-april.pdf",
@@ -200,7 +209,8 @@ export const initialJobDetails: Record<string, JobDetail> = {
       "18:44 - Aggregator merged pages 1-8 into markdown draft",
     ],
     outputPreview: {
-      markdown: "# bank-statement-april.pdf\n\n## Page 1\nStatement opening balance confirmed.\n\n## Page 2\nTransactions extracted with line grouping still in progress.",
+      markdown:
+        "# bank-statement-april.pdf\n\n## Page 1\nStatement opening balance confirmed.\n\n## Page 2\nTransactions extracted with line grouping still in progress.",
       text: "bank-statement-april.pdf\n\n----- Page 1 -----\nStatement opening balance confirmed.\n\n----- Page 2 -----\nTransactions extracted with line grouping still in progress.",
     },
     compareRows: [
@@ -226,29 +236,34 @@ export const initialJobDetails: Record<string, JobDetail> = {
     pipeline: [
       {
         title: "Upload received",
-        detail: "12 pages detected, compare mode enabled, output set to markdown and text",
+        detail:
+          "12 pages detected, compare mode enabled, output set to markdown and text",
         state: "done",
       },
       {
         title: "Page snapshots generated",
-        detail: "All pages rasterized and stored for OCR, compare review, and export replay",
+        detail:
+          "All pages rasterized and stored for OCR, compare review, and export replay",
         state: "done",
       },
       {
         title: "Extraction queue running",
-        detail: "LLM and Tesseract tasks execute with retry and page-level visibility",
+        detail:
+          "LLM and Tesseract tasks execute with retry and page-level visibility",
         state: "active",
       },
       {
         title: "Aggregator preparing exports",
-        detail: "Markdown draft updates as each page resolves or is marked partial",
+        detail:
+          "Markdown draft updates as each page resolves or is marked partial",
         state: "pending",
       },
     ],
   },
   "job-2": {
     title: "invoice-batch-q2.pdf",
-    subtitle: "Vision-only extraction queued for invoice totals and tabular data",
+    subtitle:
+      "Vision-only extraction queued for invoice totals and tabular data",
     compareSummary: "No compare lane enabled, waiting for LLM worker capacity",
     pages: invoicePages,
     events: [
@@ -257,7 +272,8 @@ export const initialJobDetails: Record<string, JobDetail> = {
       "18:34 - Job waiting for available vision slot",
     ],
     outputPreview: {
-      markdown: "# invoice-batch-q2.pdf\n\nOutput preview will unlock after the first LLM page resolves.",
+      markdown:
+        "# invoice-batch-q2.pdf\n\nOutput preview will unlock after the first LLM page resolves.",
       text: "invoice-batch-q2.pdf\n\nOutput preview pending until extraction begins.",
     },
     compareRows: [
@@ -293,8 +309,10 @@ export const initialJobDetails: Record<string, JobDetail> = {
   },
   "job-3": {
     title: "scan-kontrak.pdf",
-    subtitle: "Tesseract-first contract scan with partial success and manual review needs",
-    compareSummary: "8 pages extracted, 1 page still flagged for skew correction before final export",
+    subtitle:
+      "Tesseract-first contract scan with partial success and manual review needs",
+    compareSummary:
+      "8 pages extracted, 1 page still flagged for skew correction before final export",
     pages: contractPages,
     events: [
       "17:58 - Tesseract completed 8 pages successfully",
@@ -302,7 +320,8 @@ export const initialJobDetails: Record<string, JobDetail> = {
       "18:03 - Partial text export prepared for download",
     ],
     outputPreview: {
-      markdown: "# scan-kontrak.pdf\n\n## Page 1\nContract heading and clauses available.\n\n## Page 3\nManual review recommended before release.",
+      markdown:
+        "# scan-kontrak.pdf\n\n## Page 1\nContract heading and clauses available.\n\n## Page 3\nManual review recommended before release.",
       text: "scan-kontrak.pdf\n\n----- Page 1 -----\nContract heading and clauses available.\n\n----- Page 3 -----\nManual review recommended before release.",
     },
     compareRows: [
@@ -338,9 +357,15 @@ export const initialJobDetails: Record<string, JobDetail> = {
   },
 }
 
-export function createUploadJob(index: number, mode: ExtractionMode, output: OutputFormat, name?: string): JobRecord {
+export function createUploadJob(
+  index: number,
+  mode: ExtractionMode,
+  output: OutputFormat,
+  name?: string
+): JobRecord {
   const pages = 3 + (index % 6)
-  const filename = name?.trim() || `incoming-batch-${String(index).padStart(2, "0")}.pdf`
+  const filename =
+    name?.trim() || `incoming-batch-${String(index).padStart(2, "0")}.pdf`
 
   return {
     id: `uploaded-${index}`,
@@ -358,7 +383,9 @@ export function createUploadJob(index: number, mode: ExtractionMode, output: Out
 
 export function createJobDetail(job: JobRecord): JobDetail {
   const compareEnabled = job.mode === "Both compare"
-  const modeLabel = compareEnabled ? "Dual-engine compare lane ready" : `${job.mode} lane selected`
+  const modeLabel = compareEnabled
+    ? "Dual-engine compare lane ready"
+    : `${job.mode} lane selected`
 
   return {
     title: job.name,
@@ -369,7 +396,8 @@ export function createJobDetail(job: JobRecord): JobDetail {
     pages: Array.from({ length: Math.min(job.pages, 4) }, (_, index) => ({
       page: `Page ${String(index + 1).padStart(2, "0")}`,
       llm: compareEnabled || job.mode === "LLM only" ? "Queued" : "Ready",
-      tesseract: compareEnabled || job.mode === "Tesseract only" ? "Queued" : "Ready",
+      tesseract:
+        compareEnabled || job.mode === "Tesseract only" ? "Queued" : "Ready",
       status: "Waiting",
       note: "Waiting for snapshots, extraction assignment, and first worker slot",
     })),
@@ -385,10 +413,19 @@ export function createJobDetail(job: JobRecord): JobDetail {
     compareRows: [
       {
         page: "Page 01",
-        winner: compareEnabled ? "Tie" : job.mode === "LLM only" ? "LLM" : "Tesseract",
-        llmSummary: compareEnabled || job.mode === "LLM only" ? "Queued for vision extraction" : "LLM lane disabled",
+        winner: compareEnabled
+          ? "Tie"
+          : job.mode === "LLM only"
+            ? "LLM"
+            : "Tesseract",
+        llmSummary:
+          compareEnabled || job.mode === "LLM only"
+            ? "Queued for vision extraction"
+            : "LLM lane disabled",
         tesseractSummary:
-          compareEnabled || job.mode === "Tesseract only" ? "Queued for OCR extraction" : "Tesseract lane disabled",
+          compareEnabled || job.mode === "Tesseract only"
+            ? "Queued for OCR extraction"
+            : "Tesseract lane disabled",
       },
     ],
     pipeline: [

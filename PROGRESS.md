@@ -57,13 +57,17 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Filter `All jobs`
 - [x] Filter `Failed pages`
 - [x] Filter `Compare mode`
-- [~] Job state saat ini masih prototype/draft dan belum persisten
-- [ ] Retry page-level action nyata
+- [x] Job state sekarang memakai SQLite dev persistence bersama antar route jobs
+- [x] Retry page-level action nyata
+- [x] Tombol `Retry page` sekarang mengikuti field backend `canRetry`, bukan hardcode rule di UI
+- [x] Queue board/list job sekarang juga memakai metadata backend `canRetry` untuk action retry job
 - [ ] Cancel / pause job
 
 ## 6. Job Detail Experience
 
 - [x] Tab `Pages`
+- [x] Tab `Pages` sekarang fetch detail halaman granular dari backend SQLite store
+- [x] Tab `Pages` auto-refresh ringan saat job aktif masih `Queued`/`Processing` dan masih ada page task yang belum settle
 - [x] Tab `Compare`
 - [x] Tab `Output`
 - [x] Tab `Logs`
@@ -89,20 +93,27 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan `POST /api/jobs/start`
 - [x] Tambahkan `POST /api/jobs/start-all`
 - [x] Hubungkan dashboard ke internal route tersebut
-- [~] Route masih stateless/draft dan belum berbagi persistence nyata
-- [ ] Tambahkan `GET /api/jobs`
-- [ ] Tambahkan `GET /api/jobs/:id`
-- [ ] Tambahkan `POST /api/jobs/:id/retry`
-- [ ] Tambahkan `POST /api/pages/:id/retry`
-- [ ] Tambahkan `GET /api/jobs/:id/output`
-- [ ] Tambahkan `GET /api/jobs/:id/logs`
+- [x] Dashboard mengambil initial state dari internal API `GET /api/jobs`
+- [x] Route jobs sekarang berbagi persistence SQLite terpusat
+- [x] Tambahkan `GET /api/jobs`
+- [x] Tambahkan `GET /api/jobs/:id`
+- [x] Tambahkan `POST /api/jobs/:id/retry`
+- [x] Tambahkan `POST /api/pages/:id/retry`
+- [x] Tambahkan `GET /api/jobs/:id/output`
+- [x] Tambahkan `GET /api/jobs/:id/logs`
+- [x] Tambahkan `GET /api/jobs/:id/pages`
 
 ## 9. Shared State / Persistence
 
-- [ ] Buat mock persistence terpusat untuk dev
-- [ ] Pastikan semua route job berbagi state yang sama
-- [ ] Tambahkan skema data lebih dekat ke backend final
-- [ ] Siapkan transisi ke database/storage nyata
+- [x] Buat persistence SQLite sederhana untuk dev
+- [x] Pastikan semua route job berbagi state yang sama
+- [x] Persist jobs + job details ke file SQLite lokal untuk development
+- [x] Tambahkan skema data lebih dekat ke backend final
+- [x] Siapkan migrasi dari payload detail JSON ke tabel pipeline/page/output yang lebih granular
+- [x] Tambahkan schema version ringan + migration versioned untuk SQLite dev store
+- [x] Page payload granular sekarang membawa `page_id` stabil dari tabel `job_pages`
+- [x] Payload pages/job detail terkait sekarang menyertakan metadata `canRetry` untuk job/page retryability
+- [x] Payload `GET /api/jobs` sekarang juga menyertakan `canRetry` pada level list job untuk sinkronisasi sinyal retry frontend/backend
 
 ## 10. PDF Processing Pipeline
 
@@ -135,7 +146,9 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 
 - [x] Log panel UI per job
 - [x] Event list saat action UI dilakukan
-- [~] Log masih berbasis prototype dan draft route
+- [x] Log/output sekarang punya endpoint baca nyata di atas SQLite store yang sama
+- [~] Log masih berbasis prototype, tetapi sudah dibaca dari store granular terpusat
+- [x] Tab `Logs` dan `Output` melakukan fetch ke endpoint backend saat dibuka
 - [ ] Log dari render worker nyata
 - [ ] Log dari OCR / LLM runtime nyata
 - [ ] Error taxonomy final dan retry reason
@@ -144,13 +157,20 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 
 - [x] `npm run lint` lolos untuk progres saat ini
 - [x] `npm run typecheck` lolos untuk progres saat ini
-- [ ] Tambahkan test untuk helper action dan API draft
+- [x] Tambahkan test untuk helper action dan API draft/shared store
+- [x] Tambahkan test untuk endpoint payload halaman granular dan guard retryable page
+- [x] Tambahkan test untuk metadata `canRetry` dan helper rule auto-refresh tab `Pages`
+- [x] Tambahkan test integration-style ringan untuk wiring polling/refresh tab `Pages` tanpa browser stack tambahan
 - [ ] Tambahkan smoke test untuk flow utama dashboard
 
 ## 15. Immediate Next Priorities
 
 - [ ] Commit dan push progres terbaru
-- [ ] Tambahkan shared persistence/mock store untuk jobs
-- [ ] Tambahkan `GET /api/jobs` dan `GET /api/jobs/:id`
-- [ ] Pindahkan route draft ke model state yang lebih konsisten
+- [x] Ganti shared persistence mock jobs ke SQLite dev store
+- [x] Tambahkan `GET /api/jobs` dan `GET /api/jobs/:id`
+- [x] Sambungkan retry dashboard ke shared job API/store
+- [x] Tambahkan test ringan untuk store jobs dan route jobs
+- [x] Tambahkan test untuk endpoint/store logs dan output
+- [x] Tambahkan test untuk retry page-level dan schema version store
+- [x] Pindahkan route draft ke model state yang lebih konsisten
 - [ ] Mulai wiring upload PDF nyata dan render pipeline

@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server"
 
-import { startAllJobs, type StartAllJobsRequest } from "@/lib/job-actions"
+import { startAllJobs } from "@/lib/job-actions"
 
-export async function POST(request: Request) {
-  const payload = (await request.json()) as StartAllJobsRequest
-  const result = startAllJobs(payload)
+export async function POST() {
+  const result = startAllJobs()
 
   return NextResponse.json(result)
 }

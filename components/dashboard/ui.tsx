@@ -36,8 +36,12 @@ export function StatCard({
 }) {
   return (
     <div className="rounded-[1.4rem] border border-white/10 bg-white/6 p-4">
-      <p className="text-xs uppercase tracking-[0.22em] text-stone-400">{label}</p>
-      <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white">{value}</p>
+      <p className="text-xs tracking-[0.22em] text-stone-400 uppercase">
+        {label}
+      </p>
+      <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white">
+        {value}
+      </p>
       <p className="mt-2 text-sm leading-6 text-stone-300">{detail}</p>
     </div>
   )
@@ -57,8 +61,10 @@ export function PipelineStep({
       <div
         className={cn(
           "mt-1 h-3 w-3 rounded-full",
-          state === "done" && "bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.9)]",
-          state === "active" && "bg-amber-300 shadow-[0_0_18px_rgba(252,211,77,0.45)]",
+          state === "done" &&
+            "bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.9)]",
+          state === "active" &&
+            "bg-amber-300 shadow-[0_0_18px_rgba(252,211,77,0.45)]",
           state === "pending" && "bg-white/20"
         )}
       />
@@ -106,7 +112,9 @@ export function ConfigCard({
 }) {
   return (
     <div className="rounded-[1.1rem] border border-white/10 bg-white/5 p-3">
-      <p className="text-[11px] uppercase tracking-[0.2em] text-stone-500">{label}</p>
+      <p className="text-[11px] tracking-[0.2em] text-stone-500 uppercase">
+        {label}
+      </p>
       <h3 className="mt-2 text-sm font-medium text-white">{value}</h3>
       <p className="mt-2 text-xs leading-5 text-stone-400">{hint}</p>
     </div>
@@ -116,21 +124,25 @@ export function ConfigCard({
 export function MiniAction({
   label,
   subtle,
+  disabled,
   onClick,
 }: {
   label: string
   subtle?: boolean
+  disabled?: boolean
   onClick?: () => void
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onClick}
       className={cn(
         "rounded-full px-3 py-1.5 text-xs font-medium transition",
         subtle
           ? "border border-white/10 bg-white/5 text-stone-200 hover:bg-white/10"
-          : "bg-amber-300 text-stone-950 hover:bg-amber-200"
+          : "bg-amber-300 text-stone-950 hover:bg-amber-200",
+        disabled && "cursor-not-allowed opacity-45 hover:bg-inherit"
       )}
     >
       {label}
@@ -140,8 +152,13 @@ export function MiniAction({
 
 export function EnginePill({ name, state }: { name: string; state: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-2 rounded-full border px-2.5 py-1", statusTone(state))}>
-      <span className="text-[10px] uppercase tracking-[0.18em]">{name}</span>
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1",
+        statusTone(state)
+      )}
+    >
+      <span className="text-[10px] tracking-[0.18em] uppercase">{name}</span>
       <span className="text-xs">{state}</span>
     </span>
   )

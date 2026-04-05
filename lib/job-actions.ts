@@ -1,17 +1,27 @@
-import {
-  createJobDetail,
-  createUploadJob,
-  type ExtractionMode,
-  type JobDetail,
-  type JobRecord,
-  type OutputFormat,
+import type {
+  ExtractionMode,
+  JobDetail,
+  JobRecord,
+  OutputFormat,
 } from "@/lib/dashboard-data"
+import {
+  createJobs,
+  getJobById,
+  getJobLogsById,
+  getJobOutputById,
+  getJobPagesById,
+  getJobsState,
+  retryPageById,
+  retryJobById,
+  shouldAutoRefreshJobPages,
+  startAllStoredJobs,
+  startJobById,
+} from "@/lib/job-store"
 
 export type UploadJobsRequest = {
   files?: string[]
   mode: ExtractionMode
   output: OutputFormat
-  existingCount?: number
 }
 
 export type UploadJobsResponse = {
@@ -20,8 +30,7 @@ export type UploadJobsResponse = {
 }
 
 export type StartJobRequest = {
-  job: JobRecord
-  detail?: JobDetail
+  jobId: string
 }
 
 export type StartJobResponse = {
@@ -29,100 +38,120 @@ export type StartJobResponse = {
   detail: JobDetail
 }
 
-export type StartAllJobsRequest = {
-  jobs: JobRecord[]
-  details?: Record<string, JobDetail>
-}
-
 export type StartAllJobsResponse = {
   jobs: JobRecord[]
   details: Record<string, JobDetail>
 }
 
-export function buildUploadedJobs({ files, mode, output, existingCount = 0 }: UploadJobsRequest): UploadJobsResponse {
-  const batchNames = files && files.length > 0 ? files : [undefined, undefined]
-  const jobs = batchNames.map((name, index) =>
-    createUploadJob(existingCount + index + 1, mode, output, name)
-  )
-
-  const details = Object.fromEntries(jobs.map((job) => [job.id, createJobDetail(job)]))
-
-  return { jobs, details }
+export type RetryJobResponse = {
+  job: JobRecord
+  detail: JobDetail
 }
 
-export function startJob({ job, detail }: StartJobRequest): StartJobResponse {
-  const nextJob: JobRecord = {
-    ...job,
-    status: "Processing",
-    progress: Math.max(job.progress, 15),
-    rendered: Math.max(job.rendered, Math.min(job.pages, 2)),
-  }
-
-  const baseDetail = detail ?? createJobDetail(nextJob)
-
-  return {
-    job: nextJob,
-    detail: {
-      ...baseDetail,
-      title: nextJob.name,
-      subtitle: `${nextJob.mode} extraction with ${nextJob.output.toLowerCase()} export preset`,
-      events: [`Started ${nextJob.name}`, ...baseDetail.events].slice(0, 6),
-    },
-  }
+export type RetryPageRequest = {
+  pageId: string
 }
 
-export function startAllJobs({ jobs, details = {} }: StartAllJobsRequest): StartAllJobsResponse {
-  const nextJobs = jobs.map((job) => {
-    if (job.status === "Uploaded" || job.status === "Queued") {
-      return {
-        ...job,
-        status: "Processing" as const,
-        progress: Math.max(job.progress, 12),
-        rendered: Math.max(job.rendered, Math.min(job.pages, 2)),
-      }
-    }
+export type RetryPageResponse = {
+  job: JobRecord
+  detail: JobDetail
+  retriedPage: JobDetail["pages"][number]
+}
 
-    return job
-  })
+export type GetJobResponse = {
+  job: JobRecord
+  detail: JobDetail
+}
 
-  const nextDetails = { ...details }
+export type GetJobsResponse = {
+  jobs: JobRecord[]
+  details: Record<string, JobDetail>
+}
 
-  for (const job of nextJobs) {
-    if (job.status !== "Processing") {
-      continue
-    }
+export type GetJobLogsResponse = {
+  jobId: string
+  title: string
+  events: string[]
+  pipeline: JobDetail["pipeline"]
+}
 
-    const baseDetail = nextDetails[job.id] ?? createJobDetail(job)
-    nextDetails[job.id] = {
-      ...baseDetail,
-      subtitle: `${job.mode} extraction with ${job.output.toLowerCase()} export preset`,
-      pipeline: baseDetail.pipeline.map((step, index) => {
-        if (index === 1) {
-          return {
-            ...step,
-            title: "Page rendering started",
-            detail: "Snapshot worker is generating images for the first pages",
-            state: "active" as const,
-          }
-        }
+export type GetJobOutputResponse = {
+  jobId: string
+  title: string
+  output: OutputFormat
+  preview: JobDetail["outputPreview"]
+  generatedAt: string | null
+}
 
-        if (index === 2) {
-          return {
-            ...step,
-            title: "Extraction queue warming up",
-            detail: "Page tasks are waiting for their first OCR and vision slots",
-            state: "pending" as const,
-          }
-        }
+export type GetJobPagesResponse = {
+  jobId: string
+  title: string
+  subtitle: string
+  compareSummary: string
+  canRetry: boolean
+  pages: JobDetail["pages"]
+}
 
-        return step
-      }),
-      events: [`Start all moved ${job.name} into processing`, ...baseDetail.events].slice(0, 6),
-    }
+export type GetJobRefreshResponse = {
+  jobId: string
+  shouldRefresh: boolean
+}
+
+export function buildUploadedJobs({
+  files,
+  mode,
+  output,
+}: UploadJobsRequest): UploadJobsResponse {
+  return createJobs({ files, mode, output })
+}
+
+export function startJob({ jobId }: StartJobRequest): StartJobResponse | null {
+  return startJobById({ jobId })
+}
+
+export function startAllJobs(): StartAllJobsResponse {
+  return startAllStoredJobs()
+}
+
+export function getJobs(): GetJobsResponse {
+  return getJobsState()
+}
+
+export function getJob(jobId: string): GetJobResponse | null {
+  return getJobById(jobId)
+}
+
+export function retryJob({ jobId }: StartJobRequest): RetryJobResponse | null {
+  return retryJobById({ jobId })
+}
+
+export function retryPage({
+  pageId,
+}: RetryPageRequest): RetryPageResponse | null {
+  return retryPageById({ pageId })
+}
+
+export function getJobLogs(jobId: string): GetJobLogsResponse | null {
+  return getJobLogsById(jobId)
+}
+
+export function getJobOutput(jobId: string): GetJobOutputResponse | null {
+  return getJobOutputById(jobId)
+}
+
+export function getJobPages(jobId: string): GetJobPagesResponse | null {
+  return getJobPagesById(jobId)
+}
+
+export function getJobRefresh(jobId: string): GetJobRefreshResponse | null {
+  const job = getJobById(jobId)
+
+  if (!job) {
+    return null
   }
 
   return {
-    jobs: nextJobs,
-    details: nextDetails,
+    jobId,
+    shouldRefresh: shouldAutoRefreshJobPages(jobId),
   }
 }
