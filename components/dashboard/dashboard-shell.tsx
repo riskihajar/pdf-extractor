@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils"
 
 import {
   ConfigCard,
+  BackgroundLanePill,
   EnginePill,
   FilterPill,
   MiniAction,
@@ -718,6 +719,29 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                 </span>
               </div>
               <div className="mt-4 space-y-4">
+                {activeDetail?.background ? (
+                  <div className="rounded-[1.25rem] border border-cyan-400/15 bg-cyan-400/5 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] tracking-[0.22em] text-cyan-200/75 uppercase">
+                          Background handoff
+                        </p>
+                        <p className="mt-2 text-sm text-stone-200">
+                          {activeDetail.background.summary}
+                        </p>
+                      </div>
+                      <BackgroundLanePill
+                        queue={activeDetail.background.queue}
+                        worker={activeDetail.background.worker}
+                        status={activeDetail.background.status}
+                      />
+                    </div>
+                    <p className="mt-3 text-xs text-stone-400">
+                      Prepared at{" "}
+                      {activeDetail.background.preparedAt ?? "not yet prepared"}
+                    </p>
+                  </div>
+                ) : null}
                 {activeDetail?.pipeline.map((step) => (
                   <PipelineStep
                     key={step.title}
@@ -791,6 +815,9 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                       <p className="text-xs text-stone-400">
                         Rendered {job.rendered} / {job.pages} · Extracted{" "}
                         {job.extracted} / {job.pages} · Failed {job.failed}
+                      </p>
+                      <p className="text-[11px] text-stone-500">
+                        Background {job.backgroundReady ? "prepared" : "idle"}
                       </p>
                     </button>
                     <div className="text-sm text-stone-200">{job.pages}</div>

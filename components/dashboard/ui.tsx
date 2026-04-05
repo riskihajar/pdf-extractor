@@ -163,3 +163,27 @@ export function EnginePill({ name, state }: { name: string; state: string }) {
     </span>
   )
 }
+
+export function BackgroundLanePill({
+  queue,
+  worker,
+  status,
+}: {
+  queue: string
+  worker: string
+  status: "idle" | "prepared"
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px]",
+        status === "prepared"
+          ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-100"
+          : "border-white/10 bg-white/5 text-stone-300"
+      )}
+    >
+      <span className="tracking-[0.18em] uppercase">{queue}</span>
+      <span className="text-stone-300">{worker}</span>
+    </span>
+  )
+}
