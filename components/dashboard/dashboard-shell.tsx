@@ -58,6 +58,21 @@ type RuntimeStatus = {
   hasExamplePdfPath: boolean
 }
 
+type WorkerDiagnostics = {
+  workers: Array<{
+    queue: string
+    worker: string
+    preparedJobs: number
+    activeJobs: number
+    pendingPages: number
+  }>
+  totals: {
+    preparedJobs: number
+    activeJobs: number
+    pendingPages: number
+  }
+}
+
 type DashboardShellProps = {
   initialState: GetJobsResponse
 }
@@ -87,6 +102,8 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   const [pickedFiles, setPickedFiles] = useState<File[]>([])
   const [uploadIssues, setUploadIssues] = useState<UploadIssue[]>([])
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null)
+  const [workerDiagnostics, setWorkerDiagnostics] =
+    useState<WorkerDiagnostics | null>(null)
   const [isDetailSyncing, setIsDetailSyncing] = useState(false)
 
   const updateJobPages = useCallback(
@@ -248,6 +265,36 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     }
 
     void loadRuntimeStatus()
+
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let ignore = false
+
+    async function loadWorkerDiagnostics() {
+      try {
+        const response = await fetch("/api/workers", { cache: "no-store" })
+
+        if (!response.ok) {
+          return
+        }
+
+        const payload = (await response.json()) as WorkerDiagnostics
+
+        if (!ignore) {
+          setWorkerDiagnostics(payload)
+        }
+      } catch {
+        if (!ignore) {
+          setWorkerDiagnostics(null)
+        }
+      }
+    }
+
+    void loadWorkerDiagnostics()
 
     return () => {
       ignore = true
@@ -749,6 +796,45 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                     detail={step.detail}
                     state={step.state}
                   />
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
+              <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-3">
+                <div>
+                  <p className="text-xs tracking-[0.24em] text-stone-400 uppercase">
+                    Worker lanes
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold text-white">
+                    Background queue diagnostics
+                  </h2>
+                </div>
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-stone-300">
+                  {workerDiagnostics?.totals.preparedJobs ?? 0} prepared
+                </span>
+              </div>
+              <div className="mt-4 space-y-3">
+                {workerDiagnostics?.workers.map((lane) => (
+                  <div
+                    key={`${lane.queue}:${lane.worker}`}
+                    className="rounded-[1.2rem] border border-white/10 bg-black/10 p-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <BackgroundLanePill
+                        queue={lane.queue}
+                        worker={lane.worker}
+                        status={lane.preparedJobs > 0 ? "prepared" : "idle"}
+                      />
+                      <span className="text-xs text-stone-400">
+                        {lane.pendingPages} pending pages
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-stone-400">
+                      Prepared jobs {lane.preparedJobs} · Active jobs{" "}
+                      {lane.activeJobs}
+                    </p>
+                  </div>
                 ))}
               </div>
             </section>

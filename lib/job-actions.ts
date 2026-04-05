@@ -14,6 +14,7 @@ import {
   getRenderArtifactsByJobId,
   getUploadedFileByJobId,
   getJobsState,
+  getWorkerDiagnosticsState,
   reserveNextJobId,
   retryPageById,
   retryJobById,
@@ -96,6 +97,23 @@ export type GetJobsResponse = {
   details: Record<string, JobDetail>
 }
 
+export type WorkerSnapshot = {
+  queue: string
+  worker: string
+  preparedJobs: number
+  activeJobs: number
+  pendingPages: number
+}
+
+export type WorkerDiagnosticsResponse = {
+  workers: WorkerSnapshot[]
+  totals: {
+    preparedJobs: number
+    activeJobs: number
+    pendingPages: number
+  }
+}
+
 export type GetJobLogsResponse = {
   jobId: string
   title: string
@@ -143,6 +161,10 @@ export function startAllJobs(): StartAllJobsResponse {
 
 export function getJobs(): GetJobsResponse {
   return getJobsState()
+}
+
+export function getWorkerDiagnostics(): WorkerDiagnosticsResponse {
+  return getWorkerDiagnosticsState()
 }
 
 export function getJob(jobId: string): GetJobResponse | null {

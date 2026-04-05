@@ -3,6 +3,7 @@ import test from "node:test"
 
 import { createJobDetail } from "@/lib/dashboard-data"
 import { getJob, getJobs } from "@/lib/job-actions"
+import { GET as getWorkersRoute } from "@/app/api/workers/route"
 import { resetJobStoreForTests } from "@/lib/job-store"
 
 test.beforeEach(() => {
@@ -53,4 +54,19 @@ test("job snapshot exposes background handoff metadata", () => {
   assert.equal(queued.backgroundReady, true)
   assert.equal(detail.background.queue, "extract-llm")
   assert.equal(detail.background.status, "prepared")
+})
+
+test("worker diagnostics groups prepared jobs by queue lane", async () => {
+  const response = await getWorkersRoute()
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.ok(Array.isArray(payload.workers))
+  assert.equal(payload.totals.preparedJobs >= 3, true)
+  assert.equal(
+    payload.workers.some(
+      (lane: { queue: string }) => lane.queue === "extract-compare"
+    ),
+    true
+  )
 })

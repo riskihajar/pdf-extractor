@@ -18,6 +18,21 @@ export type JobStoreState = {
   details: Record<string, JobDetail>
 }
 
+export type WorkerDiagnosticsState = {
+  workers: Array<{
+    queue: string
+    worker: string
+    preparedJobs: number
+    activeJobs: number
+    pendingPages: number
+  }>
+  totals: {
+    preparedJobs: number
+    activeJobs: number
+    pendingPages: number
+  }
+}
+
 export type JobLogsPayload = {
   jobId: string
   title: string
@@ -356,6 +371,12 @@ function buildBackgroundState(
     preparedAt: preparedAt ?? new Date().toISOString(),
     summary: `Job sudah dipublish ke ${queue} dan siap diambil ${worker}`,
   }
+}
+
+function countPendingPages(detail: Pick<JobDetail, "pages">) {
+  return detail.pages.filter(
+    (page) => page.status === "Waiting" || page.status === "Extracting"
+  ).length
 }
 
 function writeNormalizedDetail(
@@ -1398,6 +1419,68 @@ function replaceState(db: DatabaseSync, state: JobStoreState) {
 
 export function getJobsState(): JobStoreState {
   return cloneState(readStateFromDatabase(getDatabase()))
+}
+
+export function getWorkerDiagnosticsState(): WorkerDiagnosticsState {
+  const state = readStateFromDatabase(getDatabase())
+  const grouped = new Map<
+    string,
+    {
+      queue: string
+      worker: string
+      preparedJobs: number
+      activeJobs: number
+      pendingPages: number
+    }
+  >()
+
+  state.jobs.forEach((job) => {
+    const detail = state.details[job.id]
+
+    if (!detail?.background) {
+      return
+    }
+
+    const key = `${detail.background.queue}:${detail.background.worker}`
+    const current = grouped.get(key) ?? {
+      queue: detail.background.queue,
+      worker: detail.background.worker,
+      preparedJobs: 0,
+      activeJobs: 0,
+      pendingPages: 0,
+    }
+
+    if (detail.background.status === "prepared") {
+      current.preparedJobs += 1
+    }
+
+    if (job.status === "Processing" || job.status === "Queued") {
+      current.activeJobs += 1
+    }
+
+    current.pendingPages += countPendingPages(detail)
+    grouped.set(key, current)
+  })
+
+  const workers = Array.from(grouped.values()).sort((left, right) =>
+    left.queue.localeCompare(right.queue)
+  )
+
+  return {
+    workers,
+    totals: workers.reduce(
+      (accumulator, worker) => ({
+        preparedJobs: accumulator.preparedJobs + worker.preparedJobs,
+        activeJobs: accumulator.activeJobs + worker.activeJobs,
+        pendingPages: accumulator.pendingPages + worker.pendingPages,
+      }),
+      {
+        preparedJobs: 0,
+        activeJobs: 0,
+        pendingPages: 0,
+      }
+    ),
+  }
 }
 
 export function getJobById(jobId: string) {
