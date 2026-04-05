@@ -29,23 +29,26 @@ Yang sudah ada saat ini:
 - file picker multi-upload untuk upload PDF nyata ke local dev storage,
 - tabs detail `Pages`, `Compare`, `Output`, `Logs`,
 - route internal untuk `upload`, `start`, `start-all`,
+- route internal observability untuk `GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/workers`, dan trigger mock worker `POST /api/workers/run`,
 - metadata upload + render artifacts tersimpan di SQLite dev store,
 - render pipeline nyata berbasis `pdftoppm` untuk menghasilkan PNG per halaman,
 - metadata handoff worker/background sekarang ikut disimpan agar job siap dipindah ke queue runtime berikutnya,
+- worker diagnostics dan mock worker tick untuk simulasi konsumsi queue background,
+- preview image halaman nyata via endpoint internal dan panel `Pages`,
 - route internal aman untuk status runtime LLM,
 - helper server-side untuk membaca env lokal tanpa mengekspos secret ke UI,
 - dokumentasi produk dan tracking progres.
 
 Yang masih belum selesai:
 
-- persistence shared untuk state job,
-- worker/background queue terpisah penuh,
-- queue runtime nyata untuk eksekusi worker penuh,
+- worker/background queue terpisah penuh di luar proses app,
+- queue runtime nyata dengan concurrency per lane,
 - integrasi Tesseract,
 - integrasi OpenAI-like vision API untuk extraction nyata,
 - export pipeline final,
 - detail compare berbasis hasil nyata,
-- thumbnail image di UI.
+- cancel/pause job,
+- download output final.
 
 ## Product Workflow
 
@@ -114,9 +117,18 @@ Catatan:
 Route internal yang sudah tersedia:
 
 - `GET /api/config/llm`
+- `GET /api/jobs`
+- `GET /api/jobs/:id`
+- `GET /api/jobs/:id/pages`
+- `GET /api/jobs/:id/logs`
+- `GET /api/jobs/:id/output`
 - `POST /api/jobs/upload`
 - `POST /api/jobs/start`
 - `POST /api/jobs/start-all`
+- `POST /api/jobs/:id/retry`
+- `POST /api/pages/:id/retry`
+- `GET /api/workers`
+- `POST /api/workers/run`
 
 `POST /api/jobs/upload` sekarang menerima `multipart/form-data` untuk PDF nyata dari dashboard. File PDF disimpan ke `.data/storage/uploads`, halaman dirender ke `.data/storage/renders/<job-id>`, lalu metadata path/page count/artifact disimpan ke SQLite agar job bisa dilanjutkan oleh flow `Start` yang sudah ada.
 
@@ -132,13 +144,15 @@ Vertical slice yang sekarang benar-benar jalan di local dev:
 - halaman dirender ke PNG per page memakai `pdftoppm`,
 - SQLite menyimpan metadata upload dan artifact path per halaman,
 - job hasil upload bisa masuk ke flow `Start`/`Start All` yang sama,
-- detail `Pages` menampilkan path artifact render nyata per halaman.
+- detail `Pages` menampilkan path artifact render nyata per halaman,
+- preview page image nyata sudah bisa dibuka dari endpoint internal page preview,
+- mock worker tick bisa mengonsumsi job prepared untuk mensimulasikan progress extraction.
 
 Catatan operasional:
 
 - implementasi ini menargetkan macOS/Homebrew dev setup dan default ke `/opt/homebrew/bin/pdftoppm`,
 - override path binary bisa dilakukan lewat env `PDFTOPPM_PATH`,
-- hasil render saat ini dipakai sebagai artifact yang bisa dilacak, belum ditampilkan sebagai thumbnail image di browser.
+- hasil render saat ini sudah dipakai sebagai artifact yang bisa dipreview di browser, tetapi belum punya galeri/thumbnail experience yang polished.
 
 ## Repository Structure
 
@@ -217,7 +231,7 @@ npm run format
 
 - implement shared persistence/mock store,
 - implement render worker PDF-to-image,
-- implement queue processing per halaman,
+- implement queue processing mock per halaman,
 - integrasikan Tesseract dan vision API.
 
 ### Phase 4

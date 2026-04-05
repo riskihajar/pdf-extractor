@@ -91,13 +91,17 @@ Yang sudah terwujud dalam prototype saat ini:
 - active job context,
 - tab detail `Pages`, `Compare`, `Output`, `Logs`,
 - runtime status panel untuk konfigurasi LLM,
-- internal route draft untuk upload/start/start-all.
+- internal route draft untuk upload/start/start-all,
+- persistence SQLite dev untuk job, page, log, output, dan metadata upload,
+- render PDF nyata ke PNG per halaman,
+- preview image halaman lewat route internal,
+- metadata background preparation per job,
+- worker diagnostics dan mock worker tick untuk simulasi runtime queue.
 
 Yang masih mock atau draft:
 
-- persistence job bersama,
-- queue worker nyata,
-- render PDF ke image nyata,
+- queue worker nyata di luar proses app,
+- concurrency worker per lane yang realistis,
 - OCR nyata,
 - vision extraction nyata,
 - output aggregation nyata.

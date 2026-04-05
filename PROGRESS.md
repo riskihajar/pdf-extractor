@@ -117,11 +117,10 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 
 ## 10. PDF Processing Pipeline
 
-- [ ] Upload PDF nyata ke storage lokal/dev
 - [x] Upload PDF nyata ke storage lokal/dev
 - [x] Render PDF ke image per halaman
 - [x] Simpan page image metadata
-- [ ] Tampilkan thumbnail / preview page image nyata
+- [x] Tampilkan preview page image nyata
 - [x] Pilih implementasi render utama (`pdfjs-dist` vs Poppler)
 - [x] Siapkan metadata worker/background preparation untuk render handoff
 
@@ -150,7 +149,8 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Log/output sekarang punya endpoint baca nyata di atas SQLite store yang sama
 - [~] Log masih berbasis prototype, tetapi sudah dibaca dari store granular terpusat
 - [x] Tab `Logs` dan `Output` melakukan fetch ke endpoint backend saat dibuka
-- [~] Log dari render worker nyata
+- [~] Log dari mock worker/background runtime
+- [ ] Log dari render worker nyata
 - [ ] Log dari OCR / LLM runtime nyata
 - [ ] Error taxonomy final dan retry reason
 
@@ -168,7 +168,6 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 
 ## 15. Immediate Next Priorities
 
-- [ ] Commit dan push progres terbaru
 - [x] Ganti shared persistence mock jobs ke SQLite dev store
 - [x] Tambahkan `GET /api/jobs` dan `GET /api/jobs/:id`
 - [x] Sambungkan retry dashboard ke shared job API/store
@@ -177,3 +176,13 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan test untuk retry page-level dan schema version store
 - [x] Pindahkan route draft ke model state yang lebih konsisten
 - [x] Mulai wiring upload PDF nyata dan render pipeline
+- [x] Tambahkan worker diagnostics dan mock worker tick
+
+## 16. Next Todo Plan
+
+- [ ] Tambahkan concurrency mock per queue lane (`extract-llm`, `extract-ocr`, `extract-compare`)
+- [ ] Tambahkan log worker per lane dan per page yang lebih granular
+- [ ] Integrasikan Tesseract nyata untuk extraction per halaman
+- [ ] Simpan hasil extraction per engine ke store granular
+- [ ] Sambungkan tab `Compare` dan `Output` ke hasil extraction nyata
+- [ ] Tambahkan export/download final `.md` dan `.txt`
