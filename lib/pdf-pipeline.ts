@@ -186,6 +186,21 @@ export async function preparePdfPipeline(
       mode === "Both compare"
         ? "Real page images are ready for both extraction lanes once the job starts"
         : "Real page images are ready for the selected extraction lane once the job starts",
+    background: {
+      status: "prepared",
+      worker: "render-worker",
+      queue:
+        mode === "Both compare"
+          ? "extract-compare"
+          : mode === "LLM only"
+            ? "extract-llm"
+            : "extract-ocr",
+      preparedAt: new Date().toISOString(),
+      summary:
+        mode === "Both compare"
+          ? "Render artifacts sudah dipersiapkan untuk handoff ke worker compare"
+          : `Render artifacts sudah dipersiapkan untuk handoff ke worker ${mode === "LLM only" ? "vision" : "tesseract"}`,
+    },
     pages: buildPageTasks(mode, renderedPages),
     events: [
       `Upload stored at ${upload.storedPath}`,

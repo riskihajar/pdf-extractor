@@ -106,6 +106,11 @@ type JobMetaRow = {
   title: string
   subtitle: string
   compare_summary: string
+  background_status: JobDetail["background"]["status"]
+  background_worker: string
+  background_queue: string
+  background_prepared_at: string | null
+  background_summary: string
 }
 
 type JobEventRow = {
@@ -179,7 +184,7 @@ const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
   join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
-const JOB_STORE_SCHEMA_VERSION = 4
+const JOB_STORE_SCHEMA_VERSION = 5
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -208,6 +213,7 @@ function mapJobRow(row: JobRow): JobRecord {
       status: row.status,
       failed: row.failed,
     }),
+    backgroundReady: row.status !== "Uploaded",
     name: row.name,
     pages: row.pages,
     mode: row.mode,
@@ -241,6 +247,16 @@ function normalizeDetail(job: JobRecord, detail?: JobDetail): JobDetail {
     title: source.title || fallback.title,
     subtitle: source.subtitle || fallback.subtitle,
     compareSummary: source.compareSummary || fallback.compareSummary,
+    background: {
+      status: source.background?.status || fallback.background.status,
+      worker: source.background?.worker || fallback.background.worker,
+      queue: source.background?.queue || fallback.background.queue,
+      preparedAt:
+        source.background?.preparedAt !== undefined
+          ? source.background.preparedAt
+          : fallback.background.preparedAt,
+      summary: source.background?.summary || fallback.background.summary,
+    },
     pages: (source.pages.length > 0 ? source.pages : fallback.pages).map(
       (page) => ({
         ...page,
@@ -305,6 +321,43 @@ function canRetryJob(job: Pick<JobRecord, "status" | "failed">) {
   return job.failed > 0 || job.status === "Partial success"
 }
 
+function buildBackgroundState(
+  job: Pick<JobRecord, "mode" | "status">,
+  preparedAt: string | null = null
+): JobDetail["background"] {
+  const queue =
+    job.mode === "Both compare"
+      ? "extract-compare"
+      : job.mode === "LLM only"
+        ? "extract-llm"
+        : "extract-ocr"
+
+  const worker =
+    job.mode === "Both compare"
+      ? "compare-supervisor"
+      : job.mode === "LLM only"
+        ? "vision-worker"
+        : "tesseract-worker"
+
+  if (job.status === "Uploaded") {
+    return {
+      status: "idle",
+      worker,
+      queue,
+      preparedAt,
+      summary: "Worker handoff belum disiapkan untuk job ini",
+    }
+  }
+
+  return {
+    status: "prepared",
+    worker,
+    queue,
+    preparedAt: preparedAt ?? new Date().toISOString(),
+    summary: `Job sudah dipublish ke ${queue} dan siap diambil ${worker}`,
+  }
+}
+
 function writeNormalizedDetail(
   db: DatabaseSync,
   job: JobRecord,
@@ -315,12 +368,27 @@ function writeNormalizedDetail(
   clearNormalizedTables(db, job.id)
 
   db.prepare(
-    `INSERT INTO job_meta (job_id, title, subtitle, compare_summary) VALUES (?, ?, ?, ?)`
+    `INSERT INTO job_meta (
+      job_id,
+      title,
+      subtitle,
+      compare_summary,
+      background_status,
+      background_worker,
+      background_queue,
+      background_prepared_at,
+      background_summary
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     job.id,
     normalized.title,
     normalized.subtitle,
-    normalized.compareSummary
+    normalized.compareSummary,
+    normalized.background.status,
+    normalized.background.worker,
+    normalized.background.queue,
+    normalized.background.preparedAt,
+    normalized.background.summary
   )
 
   normalized.events.forEach((event, index) => {
@@ -576,6 +644,50 @@ function applySchemaMigrations(db: DatabaseSync) {
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(4, new Date().toISOString())
   }
+
+  if (currentVersion < 5) {
+    const jobMetaColumns = db
+      .prepare(`PRAGMA table_info(job_meta)`)
+      .all() as Array<{
+      name: string
+    }>
+
+    if (!jobMetaColumns.some((column) => column.name === "background_status")) {
+      db.exec(`ALTER TABLE job_meta ADD COLUMN background_status TEXT`)
+    }
+
+    if (!jobMetaColumns.some((column) => column.name === "background_worker")) {
+      db.exec(`ALTER TABLE job_meta ADD COLUMN background_worker TEXT`)
+    }
+
+    if (!jobMetaColumns.some((column) => column.name === "background_queue")) {
+      db.exec(`ALTER TABLE job_meta ADD COLUMN background_queue TEXT`)
+    }
+
+    if (
+      !jobMetaColumns.some((column) => column.name === "background_prepared_at")
+    ) {
+      db.exec(`ALTER TABLE job_meta ADD COLUMN background_prepared_at TEXT`)
+    }
+
+    if (
+      !jobMetaColumns.some((column) => column.name === "background_summary")
+    ) {
+      db.exec(`ALTER TABLE job_meta ADD COLUMN background_summary TEXT`)
+    }
+
+    db.exec(`
+      UPDATE job_meta
+      SET background_status = COALESCE(background_status, 'idle'),
+          background_worker = COALESCE(background_worker, 'render-worker'),
+          background_queue = COALESCE(background_queue, 'render-prep'),
+          background_summary = COALESCE(background_summary, 'Worker handoff belum disiapkan untuk job ini')
+    `)
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(5, new Date().toISOString())
+  }
 }
 
 function initializeDatabase(db: DatabaseSync) {
@@ -611,7 +723,12 @@ function initializeDatabase(db: DatabaseSync) {
       job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       subtitle TEXT NOT NULL,
-      compare_summary TEXT NOT NULL
+      compare_summary TEXT NOT NULL,
+      background_status TEXT,
+      background_worker TEXT,
+      background_queue TEXT,
+      background_prepared_at TEXT,
+      background_summary TEXT
     );
 
     CREATE TABLE IF NOT EXISTS job_events (
@@ -709,7 +826,18 @@ function getDatabase() {
 function buildDetailsFromNormalizedTables(db: DatabaseSync) {
   const metaRows = db
     .prepare(
-      `SELECT job_id, title, subtitle, compare_summary FROM job_meta ORDER BY job_id ASC`
+      `SELECT
+         job_id,
+         title,
+         subtitle,
+         compare_summary,
+         background_status,
+         background_worker,
+         background_queue,
+         background_prepared_at,
+         background_summary
+       FROM job_meta
+       ORDER BY job_id ASC`
     )
     .all() as JobMetaRow[]
   const eventRows = db
@@ -752,6 +880,15 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
       title: row.title,
       subtitle: row.subtitle,
       compareSummary: row.compare_summary,
+      background: {
+        status: row.background_status || "idle",
+        worker: row.background_worker || "render-worker",
+        queue: row.background_queue || "render-prep",
+        preparedAt: row.background_prepared_at,
+        summary:
+          row.background_summary ||
+          "Worker handoff belum disiapkan untuk job ini",
+      },
       events: [],
       pages: [],
       compareRows: [],
@@ -937,6 +1074,10 @@ function applyStart(job: JobRecord, detail?: JobDetail): JobMutation {
     job: nextJob,
     detail: {
       ...baseDetail,
+      background: buildBackgroundState(
+        nextJob,
+        baseDetail.background.preparedAt
+      ),
       title: nextJob.name,
       subtitle: `${nextJob.mode} extraction with ${nextJob.output.toLowerCase()} export preset`,
       events: [`Started ${nextJob.name}`, ...baseDetail.events].slice(0, 6),
@@ -1008,6 +1149,10 @@ function applyRetry(job: JobRecord, detail?: JobDetail): JobMutation {
     job: nextJob,
     detail: {
       ...baseDetail,
+      background: buildBackgroundState(
+        nextJob,
+        baseDetail.background.preparedAt
+      ),
       title: nextJob.name,
       subtitle: `${nextJob.mode} extraction with ${nextJob.output.toLowerCase()} export preset`,
       events: [`Retry queued for ${nextJob.name}`, ...baseDetail.events].slice(
@@ -1080,6 +1225,7 @@ function applyPageRetry(
     retriedPage,
     detail: {
       ...detail,
+      background: buildBackgroundState(nextJob, detail.background.preparedAt),
       title: nextJob.name,
       subtitle: `${nextJob.mode} extraction with ${nextJob.output.toLowerCase()} export preset`,
       pages: nextPages,
@@ -1138,6 +1284,7 @@ function applyStartAll(state: JobStoreState): JobStoreState {
     const baseDetail = nextDetails[job.id] ?? createJobDetail(job)
     nextDetails[job.id] = {
       ...baseDetail,
+      background: buildBackgroundState(job, baseDetail.background.preparedAt),
       subtitle: `${job.mode} extraction with ${job.output.toLowerCase()} export preset`,
       pipeline: baseDetail.pipeline.map((step, index) => {
         if (index === 1) {

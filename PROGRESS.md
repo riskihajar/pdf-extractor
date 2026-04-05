@@ -123,7 +123,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Simpan page image metadata
 - [ ] Tampilkan thumbnail / preview page image nyata
 - [x] Pilih implementasi render utama (`pdfjs-dist` vs Poppler)
-- [~] Siapkan worker/background processing untuk render
+- [x] Siapkan metadata worker/background preparation untuk render handoff
 
 ## 11. OCR and Vision Extraction
 
@@ -150,7 +150,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Log/output sekarang punya endpoint baca nyata di atas SQLite store yang sama
 - [~] Log masih berbasis prototype, tetapi sudah dibaca dari store granular terpusat
 - [x] Tab `Logs` dan `Output` melakukan fetch ke endpoint backend saat dibuka
-- [ ] Log dari render worker nyata
+- [~] Log dari render worker nyata
 - [ ] Log dari OCR / LLM runtime nyata
 - [ ] Error taxonomy final dan retry reason
 

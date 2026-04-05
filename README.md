@@ -31,6 +31,7 @@ Yang sudah ada saat ini:
 - route internal untuk `upload`, `start`, `start-all`,
 - metadata upload + render artifacts tersimpan di SQLite dev store,
 - render pipeline nyata berbasis `pdftoppm` untuk menghasilkan PNG per halaman,
+- metadata handoff worker/background sekarang ikut disimpan agar job siap dipindah ke queue runtime berikutnya,
 - route internal aman untuk status runtime LLM,
 - helper server-side untuk membaca env lokal tanpa mengekspos secret ke UI,
 - dokumentasi produk dan tracking progres.
@@ -39,7 +40,7 @@ Yang masih belum selesai:
 
 - persistence shared untuk state job,
 - worker/background queue terpisah penuh,
-- queue runtime nyata,
+- queue runtime nyata untuk eksekusi worker penuh,
 - integrasi Tesseract,
 - integrasi OpenAI-like vision API untuk extraction nyata,
 - export pipeline final,
@@ -118,6 +119,8 @@ Route internal yang sudah tersedia:
 - `POST /api/jobs/start-all`
 
 `POST /api/jobs/upload` sekarang menerima `multipart/form-data` untuk PDF nyata dari dashboard. File PDF disimpan ke `.data/storage/uploads`, halaman dirender ke `.data/storage/renders/<job-id>`, lalu metadata path/page count/artifact disimpan ke SQLite agar job bisa dilanjutkan oleh flow `Start` yang sudah ada.
+
+Job detail dan snapshot `GET /api/jobs` juga sekarang menyimpan metadata background preparation seperti target queue, worker lane, dan waktu handoff preparation, jadi integrasi worker runtime berikutnya tinggal membaca state ini daripada menebak dari UI state.
 
 ## Real Upload + Render Pipeline
 

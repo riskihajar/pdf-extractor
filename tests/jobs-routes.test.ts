@@ -49,7 +49,10 @@ test("GET /api/jobs/:id returns a matching job", async () => {
 
   assert.equal(response.status, 200)
   assert.equal(payload.job.id, "job-1")
+  assert.equal(payload.job.backgroundReady, true)
   assert.equal(payload.detail.title, "bank-statement-april.pdf")
+  assert.equal(payload.background.status, "prepared")
+  assert.equal(payload.background.queue, "extract-compare")
   assert.equal(payload.uploadedFile ?? null, null)
   assert.deepEqual(payload.renderArtifacts ?? [], [])
   assert.equal(payload.pages.jobId, "job-1")
@@ -193,6 +196,7 @@ test("POST /api/jobs/upload stores uploaded jobs in shared SQLite state", async 
   assert.equal(response.status, 200)
   assert.ok(uploadedJob)
   assert.equal(uploadedJob.status, "Uploaded")
+  assert.equal(uploadedJob.backgroundReady, false)
   assert.ok(payload.details[uploadedJob.id])
 })
 

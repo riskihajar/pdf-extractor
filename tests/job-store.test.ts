@@ -27,9 +27,12 @@ test("startJob updates a stored job and detail", () => {
   assert.ok(result)
   assert.equal(result.job.id, "job-2")
   assert.equal(result.job.status, "Processing")
+  assert.equal(result.job.backgroundReady, true)
   assert.ok(result.job.progress >= 15)
   assert.equal(result.job.rendered, result.job.pages)
   assert.match(result.detail.events[0], /^Started /)
+  assert.equal(result.detail.background.status, "prepared")
+  assert.equal(result.detail.background.queue, "extract-llm")
 })
 
 test("retryJob updates shared job state for a failed job", () => {
@@ -81,6 +84,14 @@ test("job store persists state in the SQLite dev file", () => {
     "Processing"
   )
   assert.match(getJobStorePath(), /\.data\/jobs(?:-\d+)?\.sqlite$/)
+})
+
+test("seeded queued jobs are already background-ready", () => {
+  const snapshot = getJobs()
+  const queued = snapshot.jobs.find((job) => job.id === "job-2")
+
+  assert.ok(queued)
+  assert.equal(queued.backgroundReady, true)
 })
 
 test("job store exposes normalized logs payload for a job", () => {
@@ -139,5 +150,5 @@ test("retryPage returns null for unknown page", () => {
 })
 
 test("job store exposes current schema version", () => {
-  assert.equal(getJobStoreSchemaVersion(), 4)
+  assert.equal(getJobStoreSchemaVersion(), 5)
 })

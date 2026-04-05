@@ -86,6 +86,7 @@ export type RetryPageResponse = {
 export type GetJobResponse = {
   job: JobRecord
   detail: JobDetail
+  background: JobDetail["background"]
   uploadedFile?: UploadedJobAsset | null
   renderArtifacts?: RenderArtifact[]
 }
@@ -156,6 +157,7 @@ export function getJob(jobId: string): GetJobResponse | null {
 
   return {
     ...result,
+    background: result.detail.background,
     uploadedFile: uploadedFile && {
       storageKey: uploadedFile.storageKey,
       storedPath: uploadedFile.storedPath,

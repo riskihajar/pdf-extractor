@@ -13,6 +13,7 @@ export type DetailTab = "Pages" | "Compare" | "Output" | "Logs"
 export type JobRecord = {
   id: string
   canRetry?: boolean
+  backgroundReady?: boolean
   name: string
   pages: number
   mode: ExtractionMode
@@ -40,6 +41,13 @@ export type JobDetail = {
   title: string
   subtitle: string
   compareSummary: string
+  background: {
+    status: "idle" | "prepared"
+    worker: string
+    queue: string
+    preparedAt: string | null
+    summary: string
+  }
   pages: PageTask[]
   events: string[]
   outputPreview: {
@@ -203,6 +211,14 @@ export const initialJobDetails: Record<string, JobDetail> = {
     subtitle: "Dual-engine compare mode with markdown and plain text export",
     compareSummary:
       "9 pages aligned, 1 page flagged for OCR fallback, 2 pages still running",
+    background: {
+      status: "prepared",
+      worker: "render-worker",
+      queue: "extract-compare",
+      preparedAt: "2026-04-05T18:42:00.000Z",
+      summary:
+        "Rendered assets sudah dipublish ke queue compare untuk worker OCR dan LLM",
+    },
     pages: bankPages,
     events: [
       "18:42 - Render worker finished all 12 pages for bank-statement-april.pdf",
@@ -267,6 +283,14 @@ export const initialJobDetails: Record<string, JobDetail> = {
     subtitle:
       "Vision-only extraction queued for invoice totals and tabular data",
     compareSummary: "No compare lane enabled, waiting for LLM worker capacity",
+    background: {
+      status: "prepared",
+      worker: "vision-worker",
+      queue: "extract-llm",
+      preparedAt: "2026-04-05T18:33:00.000Z",
+      summary:
+        "Snapshot batch sudah siap dan menunggu slot worker vision berikutnya",
+    },
     pages: invoicePages,
     events: [
       "18:31 - Upload registered with 5 pages and markdown export preset",
@@ -315,6 +339,14 @@ export const initialJobDetails: Record<string, JobDetail> = {
       "Tesseract-first contract scan with partial success and manual review needs",
     compareSummary:
       "8 pages extracted, 1 page still flagged for skew correction before final export",
+    background: {
+      status: "prepared",
+      worker: "tesseract-worker",
+      queue: "extract-ocr",
+      preparedAt: "2026-04-05T17:58:00.000Z",
+      summary:
+        "Worker OCR sudah menerima artifact render dan menjaga partial output untuk retry",
+    },
     pages: contractPages,
     events: [
       "17:58 - Tesseract completed 8 pages successfully",
@@ -395,6 +427,23 @@ export function createJobDetail(job: JobRecord): JobDetail {
     compareSummary: compareEnabled
       ? "New upload will compare LLM and Tesseract outputs as pages start processing"
       : "This job will follow a single extraction lane until retry or fallback changes it",
+    background: {
+      status: "idle",
+      worker:
+        job.mode === "Both compare"
+          ? "compare-supervisor"
+          : job.mode === "LLM only"
+            ? "vision-worker"
+            : "tesseract-worker",
+      queue:
+        job.mode === "Both compare"
+          ? "extract-compare"
+          : job.mode === "LLM only"
+            ? "extract-llm"
+            : "extract-ocr",
+      preparedAt: null,
+      summary: "Worker handoff belum disiapkan untuk job ini",
+    },
     pages: Array.from({ length: Math.min(job.pages, 4) }, (_, index) => ({
       page: `Page ${String(index + 1).padStart(2, "0")}`,
       llm: compareEnabled || job.mode === "LLM only" ? "Queued" : "Ready",

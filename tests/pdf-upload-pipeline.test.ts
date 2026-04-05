@@ -39,7 +39,7 @@ test("multipart upload stores PDF metadata and render artifacts", async () => {
 
   assert.equal(response.status, 200)
   assert.ok(uploadedJob)
-  assert.equal(getJobStoreSchemaVersion(), 4)
+  assert.equal(getJobStoreSchemaVersion(), 5)
 
   const storedFile = getUploadedFileByJobId(uploadedJob.id)
   const artifacts = getRenderArtifactsByJobId(uploadedJob.id)
@@ -59,6 +59,8 @@ test("multipart upload stores PDF metadata and render artifacts", async () => {
   assert.ok(pagesPayload)
   assert.ok(job?.uploadedFile)
   assert.equal(job?.renderArtifacts?.length, 1)
+  assert.equal(job?.background.status, "prepared")
+  assert.equal(job?.job.backgroundReady, false)
   assert.equal(
     pagesPayload?.pages[0]?.previewUrl,
     `/api/pages/${encodeURIComponent(pages.pages[0]!.id!)}/preview`
