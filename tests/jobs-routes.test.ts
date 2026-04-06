@@ -6,6 +6,9 @@ import { GET as getJobLogsRoute } from "@/app/api/jobs/[id]/logs/route"
 import { GET as getJobOutputRoute } from "@/app/api/jobs/[id]/output/route"
 import { GET as downloadJobOutputRoute } from "@/app/api/jobs/[id]/output/download/route"
 import { GET as getJobPagesRoute } from "@/app/api/jobs/[id]/pages/route"
+import { POST as pauseJobRoute } from "@/app/api/jobs/[id]/pause/route"
+import { POST as cancelJobRoute } from "@/app/api/jobs/[id]/cancel/route"
+import { POST as overrideCompareWinnerRoute } from "@/app/api/jobs/[id]/compare/override/route"
 import { GET as getPagePreviewRoute } from "@/app/api/pages/[id]/preview/route"
 import { POST as retryJobRoute } from "@/app/api/jobs/[id]/retry/route"
 import { POST as retryPageRoute } from "@/app/api/pages/[id]/retry/route"
@@ -175,11 +178,14 @@ test("GET /api/jobs/:id/output returns normalized job output", async () => {
   assert.match(payload.preview.markdown, /bank-statement-april\.pdf/)
   assert.ok(Array.isArray(payload.compareAudit))
   assert.equal(payload.compareAudit[0]?.page, "Page 01")
+  assert.equal(typeof payload.isPartial, "boolean")
 })
 
 test("GET /api/jobs/:id/output/download returns markdown attachment", async () => {
   const response = await downloadJobOutputRoute(
-    new Request("http://localhost/api/jobs/job-1/output/download?format=markdown"),
+    new Request(
+      "http://localhost/api/jobs/job-1/output/download?format=markdown"
+    ),
     {
       params: Promise.resolve({ id: "job-1" }),
     }
@@ -209,6 +215,21 @@ test("GET /api/jobs/:id/output/download rejects formats outside job preset", asy
 
   assert.equal(response.status, 400)
   assert.equal(payload.message, "Requested format is not enabled for this job")
+})
+
+test("GET /api/jobs/:id/output/download supports explicit partial export", async () => {
+  const response = await downloadJobOutputRoute(
+    new Request(
+      "http://localhost/api/jobs/job-3/output/download?format=text&partial=1"
+    ),
+    {
+      params: Promise.resolve({ id: "job-3" }),
+    }
+  )
+  const body = await response.text()
+
+  assert.equal(response.status, 200)
+  assert.match(body, /EXPLICIT PARTIAL EXPORT|PARTIAL EXPORT/)
 })
 
 test("POST /api/jobs/upload stores uploaded jobs in shared SQLite state", async () => {
@@ -278,6 +299,89 @@ test("POST /api/jobs/:id/retry retries a stored job", async () => {
   assert.equal(payload.job.id, "job-3")
   assert.equal(payload.job.failed, 0)
   assert.match(payload.detail.events[0], /^Retry queued for /)
+})
+
+test("POST /api/jobs/:id/pause pauses a stored job", async () => {
+  const response = await pauseJobRoute(
+    new Request("http://localhost/api/jobs/job-1/pause", { method: "POST" }),
+    {
+      params: Promise.resolve({ id: "job-1" }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(payload.job.status, "Paused")
+  assert.match(payload.detail.events[0], /^Paused /)
+})
+
+test("POST /api/jobs/:id/cancel preserves partial output state", async () => {
+  const response = await cancelJobRoute(
+    new Request("http://localhost/api/jobs/job-2/cancel", { method: "POST" }),
+    {
+      params: Promise.resolve({ id: "job-2" }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(payload.job.status, "Cancelled")
+  assert.match(payload.detail.compareSummary, /dibatalkan/)
+})
+
+test("POST /api/jobs/:id/compare/override updates manual winner", async () => {
+  const response = await overrideCompareWinnerRoute(
+    new Request("http://localhost/api/jobs/job-1/compare/override", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ page: "Page 02", winner: "Tesseract" }),
+    }),
+    {
+      params: Promise.resolve({ id: "job-1" }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(payload.compareRow.page, "Page 02")
+  assert.equal(payload.compareRow.winner, "Tesseract")
+  assert.equal(payload.compareRow.overridden, true)
+})
+
+test("POST /api/jobs/:id/compare/override resets winner to auto scoring", async () => {
+  await overrideCompareWinnerRoute(
+    new Request("http://localhost/api/jobs/job-1/compare/override", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ page: "Page 02", winner: "Tesseract" }),
+    }),
+    {
+      params: Promise.resolve({ id: "job-1" }),
+    }
+  )
+
+  const response = await overrideCompareWinnerRoute(
+    new Request("http://localhost/api/jobs/job-1/compare/override", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ page: "Page 02", winner: "auto" }),
+    }),
+    {
+      params: Promise.resolve({ id: "job-1" }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(payload.compareRow.page, "Page 02")
+  assert.equal(payload.compareRow.overridden, false)
+  assert.equal(payload.compareRow.winner, "LLM")
 })
 
 test("POST /api/jobs/:id/retry returns 404 for missing job", async () => {

@@ -4,6 +4,8 @@ export type JobStatus =
   | "Uploaded"
   | "Queued"
   | "Processing"
+  | "Paused"
+  | "Cancelled"
   | "Partial success"
   | "Completed"
 export type EngineState = "Ready" | "Queued" | "Running" | "Done" | "Failed"
@@ -54,12 +56,19 @@ export type JobDetail = {
     markdown: string
     text: string
   }
+  outputMeta?: {
+    isPartial: boolean
+    failedPages: string[]
+    missingPages: string[]
+    winnerOverrides: string[]
+  }
   compareRows: Array<{
     page: string
     winner: "LLM" | "Tesseract" | "Tie"
     llmSummary: string
     tesseractSummary: string
     reason?: string
+    overridden?: boolean
     scores?: {
       llm: number
       tesseract: number

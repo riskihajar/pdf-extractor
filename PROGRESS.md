@@ -61,7 +61,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Retry page-level action nyata
 - [x] Tombol `Retry page` sekarang mengikuti field backend `canRetry`, bukan hardcode rule di UI
 - [x] Queue board/list job sekarang juga memakai metadata backend `canRetry` untuk action retry job
-- [ ] Cancel / pause job
+- [x] Cancel / pause job
 
 ## 6. Job Detail Experience
 
@@ -76,7 +76,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Output preview `.md`
 - [x] Output preview `.txt`
 - [ ] Diff compare viewer lebih detail
-- [ ] Manual choose winner per page
+- [x] Manual choose winner per page
 
 ## 7. Runtime Config and Environment
 
@@ -143,7 +143,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Generate markdown nyata dari hasil extraction
 - [x] Generate text nyata dari hasil extraction
 - [x] Download output final
-- [ ] Partial export jika ada halaman gagal
+- [x] Partial export jika ada halaman gagal
 
 ## 13. Observability and Logs
 

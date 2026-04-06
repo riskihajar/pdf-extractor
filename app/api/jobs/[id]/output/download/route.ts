@@ -18,6 +18,11 @@ function resolveDownloadFormat(request: Request): DownloadFormat | null {
   return format === "markdown" || format === "text" ? format : null
 }
 
+function resolvePartialMode(request: Request) {
+  const { searchParams } = new URL(request.url)
+  return searchParams.get("partial") === "1"
+}
+
 function supportsFormat(output: OutputFormat, format: DownloadFormat) {
   if (output === "MD + TXT") {
     return true
@@ -39,6 +44,7 @@ function buildDownloadFilename(title: string, format: DownloadFormat) {
 export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params
   const format = resolveDownloadFormat(request)
+  const partialMode = resolvePartialMode(request)
 
   if (!format) {
     return NextResponse.json(
@@ -60,8 +66,28 @@ export async function GET(request: Request, context: RouteContext) {
     )
   }
 
-  const body =
+  let body =
     format === "markdown" ? output.preview.markdown : output.preview.text
+
+  if (partialMode) {
+    const partialNotice = [
+      output.failedPages?.length
+        ? `Failed pages: ${output.failedPages.join(", ")}`
+        : null,
+      output.missingPages?.length
+        ? `Pending pages: ${output.missingPages.join(", ")}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+    if (partialNotice) {
+      body =
+        format === "markdown"
+          ? `> Explicit partial export\n> ${partialNotice.split("\n").join("\n> ")}\n\n${body}`
+          : `[EXPLICIT PARTIAL EXPORT]\n${partialNotice}\n\n${body}`
+    }
+  }
 
   return new Response(body, {
     headers: {

@@ -48,6 +48,10 @@ export type JobOutputPayload = {
   output: OutputFormat
   preview: JobDetail["outputPreview"]
   generatedAt: string | null
+  isPartial?: boolean
+  failedPages?: string[]
+  missingPages?: string[]
+  winnerOverrides?: string[]
   sources?: {
     tesseractPages: Array<{
       page: string
@@ -58,6 +62,7 @@ export type JobOutputPayload = {
     page: string
     winner: "LLM" | "Tesseract" | "Tie"
     reason?: string
+    overridden?: boolean
     scores?: {
       llm: number
       tesseract: number
@@ -103,6 +108,12 @@ type CreateUploadedJobInput = {
 
 type UpdateJobInput = {
   jobId: string
+}
+
+type OverrideCompareWinnerInput = {
+  jobId: string
+  page: string
+  winner: "LLM" | "Tesseract" | "auto"
 }
 
 type RetryPageInput = {
@@ -213,9 +224,12 @@ type JobCompareRow = {
   llm_summary: string
   tesseract_summary: string
   winner_reason?: string | null
+  overridden?: number | null
   llm_score?: number | null
   tesseract_score?: number | null
 }
+
+type JobOutputMeta = NonNullable<JobDetail["outputMeta"]>
 
 type JobPipelineRow = {
   job_id: string
@@ -240,7 +254,7 @@ const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
   join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
-const JOB_STORE_SCHEMA_VERSION = 8
+const JOB_STORE_SCHEMA_VERSION = 9
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -326,6 +340,12 @@ function normalizeDetail(job: JobRecord, detail?: JobDetail): JobDetail {
       markdown:
         source.outputPreview.markdown || fallback.outputPreview.markdown,
       text: source.outputPreview.text || fallback.outputPreview.text,
+    },
+    outputMeta: {
+      isPartial: source.outputMeta?.isPartial ?? false,
+      failedPages: source.outputMeta?.failedPages?.slice() ?? [],
+      missingPages: source.outputMeta?.missingPages?.slice() ?? [],
+      winnerOverrides: source.outputMeta?.winnerOverrides?.slice() ?? [],
     },
     compareRows:
       source.compareRows.length > 0
@@ -574,6 +594,87 @@ function explainCompareWinner(llmText: string, tesseractText: string) {
   return "Winner dipilih dari skor gabungan panjang, jumlah kata, dan confidence penalty"
 }
 
+function buildOutputMeta(
+  detail: Pick<JobDetail, "pages" | "compareRows">
+): JobOutputMeta {
+  const failedPages = detail.pages
+    .filter(
+      (page) =>
+        page.status === "Needs review" ||
+        page.llm === "Failed" ||
+        page.tesseract === "Failed"
+    )
+    .map((page) => page.page)
+  const missingPages = detail.pages
+    .filter((page) => page.status === "Waiting" || page.status === "Extracting")
+    .map((page) => page.page)
+  const winnerOverrides = detail.compareRows
+    .filter((row) => row.overridden)
+    .map((row) => row.page)
+
+  return {
+    isPartial: failedPages.length > 0 || missingPages.length > 0,
+    failedPages,
+    missingPages,
+    winnerOverrides,
+  }
+}
+
+function buildPartialNotice(meta: JobOutputMeta) {
+  const parts: string[] = []
+
+  if (meta.failedPages.length > 0) {
+    parts.push(`Failed pages: ${meta.failedPages.join(", ")}`)
+  }
+
+  if (meta.missingPages.length > 0) {
+    parts.push(`Pending pages: ${meta.missingPages.join(", ")}`)
+  }
+
+  if (meta.winnerOverrides.length > 0) {
+    parts.push(`Manual winners: ${meta.winnerOverrides.join(", ")}`)
+  }
+
+  return parts.join("\n")
+}
+
+function withOutputMeta(
+  preview: JobDetail["outputPreview"],
+  meta: JobOutputMeta
+): JobDetail["outputPreview"] {
+  if (!meta.isPartial && meta.winnerOverrides.length === 0) {
+    return preview
+  }
+
+  const notice = buildPartialNotice(meta)
+  const markdownPrefix = meta.isPartial
+    ? `> Partial export\n> ${notice.split("\n").join("\n> ")}\n\n`
+    : notice
+      ? `> Manual compare overrides\n> ${notice.split("\n").join("\n> ")}\n\n`
+      : ""
+  const textPrefix = meta.isPartial
+    ? `[PARTIAL EXPORT]\n${notice}\n\n`
+    : notice
+      ? `[MANUAL OVERRIDES]\n${notice}\n\n`
+      : ""
+
+  return {
+    markdown: `${markdownPrefix}${preview.markdown}`,
+    text: `${textPrefix}${preview.text}`,
+  }
+}
+
+function applyOutputMeta(detail: JobDetail): JobDetail {
+  const outputMeta = buildOutputMeta(detail)
+  const preview = withOutputMeta(detail.outputPreview, outputMeta)
+
+  return {
+    ...detail,
+    outputMeta,
+    outputPreview: preview,
+  }
+}
+
 function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
   const concurrency = getWorkerConcurrency(job)
   const lane = getWorkerLaneLabel(job)
@@ -689,7 +790,7 @@ function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
 
   return {
     job: nextJob,
-    detail: nextDetail,
+    detail: applyOutputMeta(nextDetail),
   }
 }
 
@@ -751,7 +852,7 @@ async function applyTesseractWorkerRun(
 
   return {
     job: nextJob,
-    detail: {
+    detail: applyOutputMeta({
       ...detail,
       background: buildBackgroundState(nextJob, detail.background.preparedAt),
       subtitle: "Tesseract OCR runtime is extracting rendered pages",
@@ -804,7 +905,7 @@ async function applyTesseractWorkerRun(
 
         return step
       }),
-    },
+    }),
   }
 }
 
@@ -853,14 +954,14 @@ async function applyLlmWorkerRun(
           ...job,
           status: "Processing",
         },
-        detail: {
+        detail: applyOutputMeta({
           ...detail,
           pages: nextPages,
           events: [
             `[extract-llm] failed ${page.page}: ${error instanceof Error ? error.message : String(error)}`,
             ...detail.events,
           ].slice(0, 12),
-        },
+        }),
       }
     }
 
@@ -903,7 +1004,7 @@ async function applyLlmWorkerRun(
 
   return {
     job: nextJob,
-    detail: {
+    detail: applyOutputMeta({
       ...detail,
       background: buildBackgroundState(nextJob, detail.background.preparedAt),
       subtitle: "Vision LLM runtime is extracting rendered pages",
@@ -956,7 +1057,7 @@ async function applyLlmWorkerRun(
 
         return step
       }),
-    },
+    }),
   }
 }
 
@@ -1037,7 +1138,7 @@ async function applyCompareWorkerRun(
 
   return {
     job: nextJob,
-    detail: {
+    detail: applyOutputMeta({
       ...detail,
       background: buildBackgroundState(nextJob, detail.background.preparedAt),
       subtitle: "Compare lane is reconciling OCR and vision LLM output",
@@ -1062,11 +1163,11 @@ async function applyCompareWorkerRun(
 
         return {
           ...row,
-          winner: chooseCompareWinner(
-            llmText,
-            tesseractText
-          ) as "LLM" | "Tesseract",
+          winner: chooseCompareWinner(llmText, tesseractText) as
+            | "LLM"
+            | "Tesseract",
           reason: explainCompareWinner(llmText, tesseractText),
+          overridden: row.overridden ?? false,
           scores: scoreCompareOutputs(llmText, tesseractText),
           llmSummary: processedRow?.llm.slice(0, 120) ?? row.llmSummary,
           tesseractSummary:
@@ -1106,7 +1207,7 @@ async function applyCompareWorkerRun(
 
         return step
       }),
-    },
+    }),
   }
 }
 
@@ -1171,8 +1272,8 @@ function writeNormalizedDetail(
   normalized.compareRows.forEach((row, index) => {
     db.prepare(
       `INSERT INTO job_compare_rows (
-        job_id, position, page_label, winner, llm_summary, tesseract_summary, winner_reason, llm_score, tesseract_score
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        job_id, position, page_label, winner, llm_summary, tesseract_summary, winner_reason, overridden, llm_score, tesseract_score
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       job.id,
       index,
@@ -1181,6 +1282,7 @@ function writeNormalizedDetail(
       row.llmSummary,
       row.tesseractSummary,
       row.reason ?? null,
+      row.overridden ? 1 : 0,
       row.scores?.llm ?? null,
       row.scores?.tesseract ?? null
     )
@@ -1496,6 +1598,24 @@ function applySchemaMigrations(db: DatabaseSync) {
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(8, new Date().toISOString())
   }
+
+  if (currentVersion < 9) {
+    const compareColumns = db
+      .prepare(`PRAGMA table_info(job_compare_rows)`)
+      .all() as Array<{
+      name: string
+    }>
+
+    if (!compareColumns.some((column) => column.name === "overridden")) {
+      db.exec(
+        `ALTER TABLE job_compare_rows ADD COLUMN overridden INTEGER DEFAULT 0`
+      )
+    }
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(9, new Date().toISOString())
+  }
 }
 
 function initializeDatabase(db: DatabaseSync) {
@@ -1568,6 +1688,7 @@ function initializeDatabase(db: DatabaseSync) {
       llm_summary TEXT NOT NULL,
       tesseract_summary TEXT NOT NULL,
       winner_reason TEXT,
+      overridden INTEGER DEFAULT 0,
       llm_score REAL,
       tesseract_score REAL,
       PRIMARY KEY (job_id, position)
@@ -1668,9 +1789,9 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
   const compareRows = db
     .prepare(
       `SELECT job_id, position, page_label, winner, llm_summary, tesseract_summary
-              , winner_reason, llm_score, tesseract_score
-       FROM job_compare_rows
-       ORDER BY job_id ASC, position ASC`
+              , winner_reason, overridden, llm_score, tesseract_score
+        FROM job_compare_rows
+        ORDER BY job_id ASC, position ASC`
     )
     .all() as JobCompareRow[]
   const pipelineRows = db
@@ -1764,6 +1885,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
       llmSummary: row.llm_summary,
       tesseractSummary: row.tesseract_summary,
       reason: row.winner_reason ?? undefined,
+      overridden: Boolean(row.overridden),
       scores:
         row.llm_score !== undefined &&
         row.llm_score !== null &&
@@ -1897,7 +2019,7 @@ function applyStart(job: JobRecord, detail?: JobDetail): JobMutation {
 
   return {
     job: nextJob,
-    detail: {
+    detail: applyOutputMeta({
       ...baseDetail,
       background: buildBackgroundState(
         nextJob,
@@ -1953,7 +2075,7 @@ function applyStart(job: JobRecord, detail?: JobDetail): JobMutation {
 
         return step
       }),
-    },
+    }),
   }
 }
 
@@ -1972,7 +2094,7 @@ function applyRetry(job: JobRecord, detail?: JobDetail): JobMutation {
 
   return {
     job: nextJob,
-    detail: {
+    detail: applyOutputMeta({
       ...baseDetail,
       background: buildBackgroundState(
         nextJob,
@@ -2009,7 +2131,7 @@ function applyRetry(job: JobRecord, detail?: JobDetail): JobMutation {
 
         return step
       }),
-    },
+    }),
   }
 }
 
@@ -2048,7 +2170,7 @@ function applyPageRetry(
   return {
     job: nextJob,
     retriedPage,
-    detail: {
+    detail: applyOutputMeta({
       ...detail,
       background: buildBackgroundState(nextJob, detail.background.preparedAt),
       title: nextJob.name,
@@ -2081,7 +2203,200 @@ function applyPageRetry(
 
         return step
       }),
-    },
+    }),
+  }
+}
+
+function applyPause(job: JobRecord, detail?: JobDetail): JobMutation {
+  const baseDetail = detail ?? createJobDetail(job)
+  const nextJob: JobRecord = {
+    ...job,
+    status: "Paused",
+  }
+
+  return {
+    job: nextJob,
+    detail: applyOutputMeta({
+      ...baseDetail,
+      background: {
+        ...buildBackgroundState(nextJob, baseDetail.background.preparedAt),
+        status: "idle",
+        summary: "Job dipause dan sementara tidak akan diambil worker",
+      },
+      events: [`Paused ${nextJob.name}`, ...baseDetail.events].slice(0, 12),
+      compareSummary: `Job dipause dengan ${nextJob.failed} halaman gagal dan ${nextJob.extracted}/${nextJob.pages} halaman sudah diproses`,
+      pages: baseDetail.pages.map((page) => {
+        if (page.status === "Extracting") {
+          return {
+            ...page,
+            llm: page.llm === "Running" ? "Queued" : page.llm,
+            tesseract: page.tesseract === "Running" ? "Queued" : page.tesseract,
+            status: "Waiting",
+            note: `${page.page} dipause sebelum lane aktif menyelesaikan extraction`,
+          }
+        }
+
+        return { ...page }
+      }),
+      pipeline: baseDetail.pipeline.map((step, index) => {
+        if (index === 2) {
+          return {
+            ...step,
+            title: "Extraction paused",
+            detail:
+              "Worker lane dihentikan sementara tanpa menghapus hasil parsial yang sudah ada",
+            state: "pending" as const,
+          }
+        }
+
+        return step
+      }),
+    }),
+  }
+}
+
+function applyCancel(job: JobRecord, detail?: JobDetail): JobMutation {
+  const baseDetail = detail ?? createJobDetail(job)
+  const nextJob: JobRecord = {
+    ...job,
+    status: "Cancelled",
+    progress: Math.min(job.progress, 99),
+  }
+
+  return {
+    job: nextJob,
+    detail: applyOutputMeta({
+      ...baseDetail,
+      background: {
+        ...buildBackgroundState(nextJob, baseDetail.background.preparedAt),
+        status: "idle",
+        summary:
+          "Job dibatalkan; hasil parsial tetap tersedia untuk inspeksi dan export",
+      },
+      events: [`Cancelled ${nextJob.name}`, ...baseDetail.events].slice(0, 12),
+      compareSummary: `Job dibatalkan. Output parsial dipertahankan untuk ${nextJob.extracted} halaman yang sudah selesai`,
+      pages: baseDetail.pages.map((page) => {
+        if (page.status === "Waiting" || page.status === "Extracting") {
+          return {
+            ...page,
+            llm: page.llm === "Running" ? "Queued" : page.llm,
+            tesseract: page.tesseract === "Running" ? "Queued" : page.tesseract,
+            status: "Needs review",
+            note: `${page.page} dibatalkan sebelum extraction selesai; output file tetap ditandai partial`,
+          }
+        }
+
+        return { ...page }
+      }),
+      pipeline: baseDetail.pipeline.map((step, index) => {
+        if (index === 2) {
+          return {
+            ...step,
+            title: "Job cancelled",
+            detail:
+              "Queue dihentikan manual dan halaman belum selesai ditandai untuk review manual",
+            state: "pending" as const,
+          }
+        }
+
+        if (index === 3) {
+          return {
+            ...step,
+            title: "Partial export retained",
+            detail:
+              "Aggregator menyimpan hasil yang sudah ada agar tetap bisa diunduh setelah cancel",
+            state: "active" as const,
+          }
+        }
+
+        return step
+      }),
+    }),
+  }
+}
+
+function applyCompareWinnerOverride(
+  job: JobRecord,
+  detail: JobDetail,
+  input: OverrideCompareWinnerInput
+) {
+  const nextCompareRows = detail.compareRows.map((row) => {
+    if (row.page !== input.page) {
+      return { ...row }
+    }
+
+    if (input.winner === "auto") {
+      const autoWinner = chooseCompareWinner(
+        row.llmSummary,
+        row.tesseractSummary
+      ) as "LLM" | "Tesseract"
+
+      return {
+        ...row,
+        winner: autoWinner,
+        overridden: false,
+        reason: explainCompareWinner(row.llmSummary, row.tesseractSummary),
+      }
+    }
+
+    return {
+      ...row,
+      winner: input.winner,
+      overridden: true,
+      reason: `Winner diubah manual ke ${input.winner} oleh operator dashboard`,
+    }
+  })
+
+  const updatedRow = nextCompareRows.find((row) => row.page === input.page)
+
+  if (!updatedRow) {
+    return null
+  }
+
+  const nextPages = detail.pages.map((page) => {
+    if (page.page !== input.page) {
+      return { ...page }
+    }
+
+    return {
+      ...page,
+      note:
+        input.winner === "auto"
+          ? `COMPARE: reset to auto winner`
+          : `COMPARE: ${input.winner} (manual override)`,
+    }
+  })
+
+  return {
+    job,
+    compareRow: updatedRow,
+    detail: applyOutputMeta({
+      ...detail,
+      pages: nextPages,
+      compareRows: nextCompareRows,
+      events: [
+        input.winner === "auto"
+          ? `Winner override reset untuk ${input.page}`
+          : `Manual winner override untuk ${input.page} -> ${input.winner}`,
+        ...detail.events,
+      ].slice(0, 12),
+      compareSummary:
+        input.winner === "auto"
+          ? `${input.page} kembali memakai auto compare winner dari scoring engine`
+          : `${input.page} sekarang memakai winner manual ${input.winner}; output final menyesuaikan override ini`,
+      pipeline: detail.pipeline.map((step, index) => {
+        if (index === 3) {
+          return {
+            ...step,
+            title: "Output refreshed with manual winner",
+            detail: `Aggregator menyesuaikan export berdasarkan override compare pada ${input.page}`,
+            state: "active" as const,
+          }
+        }
+
+        return step
+      }),
+    }),
   }
 }
 
@@ -2496,6 +2811,8 @@ export function getJobOutputById(jobId: string): JobOutputPayload | null {
     )
     .get(jobId) as JobOutputRow | undefined
 
+  const outputMeta = buildOutputMeta(result.detail)
+
   return {
     jobId,
     title: result.detail.title,
@@ -2505,6 +2822,10 @@ export function getJobOutputById(jobId: string): JobOutputPayload | null {
       text: outputRow?.text ?? result.detail.outputPreview.text,
     },
     generatedAt: outputRow?.generated_at ?? null,
+    isPartial: outputMeta.isPartial,
+    failedPages: outputMeta.failedPages,
+    missingPages: outputMeta.missingPages,
+    winnerOverrides: outputMeta.winnerOverrides,
     sources: {
       tesseractPages: result.detail.pages
         .filter((page) => page.note.startsWith("OCR: "))
@@ -2517,6 +2838,7 @@ export function getJobOutputById(jobId: string): JobOutputPayload | null {
       page: row.page,
       winner: row.winner,
       reason: row.reason,
+      overridden: row.overridden ?? false,
       scores: row.scores,
     })),
   }
@@ -2650,6 +2972,40 @@ export function retryJobById({ jobId }: UpdateJobInput) {
   }
 }
 
+export function pauseJobById({ jobId }: UpdateJobInput) {
+  const db = getDatabase()
+  const current = getJobById(jobId)
+
+  if (!current) {
+    return null
+  }
+
+  const mutation = applyPause(current.job, current.detail)
+  updateStoredJob(db, mutation)
+
+  return {
+    job: { ...mutation.job },
+    detail: structuredClone(mutation.detail),
+  }
+}
+
+export function cancelJobById({ jobId }: UpdateJobInput) {
+  const db = getDatabase()
+  const current = getJobById(jobId)
+
+  if (!current) {
+    return null
+  }
+
+  const mutation = applyCancel(current.job, current.detail)
+  updateStoredJob(db, mutation)
+
+  return {
+    job: { ...mutation.job },
+    detail: structuredClone(mutation.detail),
+  }
+}
+
 export function retryPageById({ pageId }: RetryPageInput) {
   const db = getDatabase()
   const pageRow = db
@@ -2678,6 +3034,36 @@ export function retryPageById({ pageId }: RetryPageInput) {
     job: { ...mutation.job },
     detail: structuredClone(mutation.detail),
     retriedPage: { ...mutation.retriedPage },
+  }
+}
+
+export function overrideCompareWinnerByPage(input: OverrideCompareWinnerInput) {
+  const db = getDatabase()
+  const current = getJobById(input.jobId)
+
+  if (!current) {
+    return null
+  }
+
+  const mutation = applyCompareWinnerOverride(
+    current.job,
+    current.detail,
+    input
+  )
+
+  if (!mutation) {
+    return null
+  }
+
+  updateStoredJob(db, {
+    job: mutation.job,
+    detail: mutation.detail,
+  })
+
+  return {
+    job: { ...mutation.job },
+    detail: structuredClone(mutation.detail),
+    compareRow: { ...mutation.compareRow },
   }
 }
 

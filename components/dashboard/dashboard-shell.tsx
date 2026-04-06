@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,8 @@ import type {
   GetJobLogsResponse,
   GetJobOutputResponse,
   GetJobPagesResponse,
+  JobControlResponse,
+  OverrideCompareWinnerResponse,
   RetryJobResponse,
   RetryPageResponse,
   StartAllJobsResponse,
@@ -110,9 +113,10 @@ type DetailTabSyncOptions = {
 
 function buildOutputDownloadUrl(
   jobId: string,
-  format: "markdown" | "text"
+  format: "markdown" | "text",
+  partial?: boolean
 ) {
-  return `/api/jobs/${encodeURIComponent(jobId)}/output/download?format=${format}`
+  return `/api/jobs/${encodeURIComponent(jobId)}/output/download?format=${format}${partial ? "&partial=1" : ""}`
 }
 
 function formatRuntimeCheck(check: RuntimeConnectionCheck | null) {
@@ -200,6 +204,7 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   const activeDetail = activeJob
     ? (jobDetails[activeJob.id] ?? createJobDetail(activeJob))
     : null
+  const activeOutputMeta = activeDetail?.outputMeta
   const canDownloadMarkdown =
     activeJob?.output === "Markdown" || activeJob?.output === "MD + TXT"
   const canDownloadText =
@@ -658,6 +663,48 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     }))
   }
 
+  async function handlePause(jobId: string) {
+    const response = await fetch(`/api/jobs/${jobId}/pause`, {
+      method: "POST",
+    })
+
+    if (!response.ok) {
+      return
+    }
+
+    const payload = (await response.json()) as JobControlResponse
+    setJobs((current) =>
+      current.map((job) => (job.id === jobId ? payload.job : job))
+    )
+    setJobDetails((current) => ({
+      ...current,
+      [jobId]: payload.detail,
+    }))
+    setActiveJobId(jobId)
+    setActiveTab("Logs")
+  }
+
+  async function handleCancel(jobId: string) {
+    const response = await fetch(`/api/jobs/${jobId}/cancel`, {
+      method: "POST",
+    })
+
+    if (!response.ok) {
+      return
+    }
+
+    const payload = (await response.json()) as JobControlResponse
+    setJobs((current) =>
+      current.map((job) => (job.id === jobId ? payload.job : job))
+    )
+    setJobDetails((current) => ({
+      ...current,
+      [jobId]: payload.detail,
+    }))
+    setActiveJobId(jobId)
+    setActiveTab("Output")
+  }
+
   async function handlePageRetry(pageId: string) {
     if (!activeJob || !activeDetail) {
       return
@@ -690,6 +737,36 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
       [activeJob.id]: payload.detail,
     }))
     setActiveTab("Pages")
+  }
+
+  async function handleWinnerOverride(
+    page: string,
+    winner: "LLM" | "Tesseract" | "auto"
+  ) {
+    if (!activeJob) {
+      return
+    }
+
+    const response = await fetch(`/api/jobs/${activeJob.id}/compare/override`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ page, winner }),
+    })
+
+    if (!response.ok) {
+      return
+    }
+
+    const payload = (await response.json()) as OverrideCompareWinnerResponse
+    setJobs((current) =>
+      current.map((job) => (job.id === activeJob.id ? payload.job : job))
+    )
+    setJobDetails((current) => ({
+      ...current,
+      [activeJob.id]: payload.detail,
+    }))
   }
 
   async function handleWorkerTick() {
@@ -970,7 +1047,8 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                         LLM: {formatRuntimeCheck(llmConnectionCheck)}
                       </p>
                       <p className="mt-1 text-xs leading-5 text-stone-400">
-                        Tesseract: {formatRuntimeCheck(tesseractConnectionCheck)}
+                        Tesseract:{" "}
+                        {formatRuntimeCheck(tesseractConnectionCheck)}
                       </p>
                     </div>
                   </div>
@@ -1170,6 +1248,21 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                         onClick={() => void handleJobStart(job.id)}
                       />
                       <MiniAction
+                        label="Pause"
+                        subtle
+                        disabled={job.status !== "Processing"}
+                        onClick={() => void handlePause(job.id)}
+                      />
+                      <MiniAction
+                        label="Cancel"
+                        subtle
+                        disabled={
+                          job.status === "Cancelled" ||
+                          job.status === "Completed"
+                        }
+                        onClick={() => void handleCancel(job.id)}
+                      />
+                      <MiniAction
                         label="View"
                         subtle
                         onClick={() => {
@@ -1263,12 +1356,16 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                               </p>
                             </div>
                             <div className="bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.16),_transparent_48%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0))] p-3">
-                              <img
-                                src={task.previewUrl}
-                                alt={`${task.page} rendered preview`}
-                                className="h-auto w-full rounded-[0.9rem] border border-white/10 bg-white object-contain shadow-[0_18px_45px_rgba(0,0,0,0.35)]"
-                                loading="lazy"
-                              />
+                              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-[0.9rem] border border-white/10 bg-white shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
+                                <Image
+                                  src={task.previewUrl}
+                                  alt={`${task.page} rendered preview`}
+                                  fill
+                                  className="object-contain"
+                                  sizes="(max-width: 768px) 100vw, 420px"
+                                  unoptimized
+                                />
+                              </div>
                             </div>
                           </div>
                         ) : null}
@@ -1348,6 +1445,35 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                             ) : null}
                           </div>
                         ) : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <MiniAction
+                            label="Use LLM"
+                            subtle
+                            onClick={() =>
+                              void handleWinnerOverride(row.page, "LLM")
+                            }
+                          />
+                          <MiniAction
+                            label="Use Tesseract"
+                            subtle
+                            onClick={() =>
+                              void handleWinnerOverride(row.page, "Tesseract")
+                            }
+                          />
+                          <MiniAction
+                            label="Reset auto"
+                            subtle
+                            disabled={!row.overridden}
+                            onClick={() =>
+                              void handleWinnerOverride(row.page, "auto")
+                            }
+                          />
+                          {row.overridden ? (
+                            <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 text-[11px] tracking-[0.18em] text-cyan-100 uppercase">
+                              Manual override
+                            </span>
+                          ) : null}
+                        </div>
                       </article>
                     ))}
                   </div>
@@ -1386,6 +1512,33 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                       <pre className="mt-4 overflow-x-auto font-mono text-xs leading-6 whitespace-pre-wrap text-stone-300">
                         {activeDetail?.outputPreview.markdown}
                       </pre>
+                      {activeOutputMeta?.isPartial ? (
+                        <p className="mt-3 text-[11px] tracking-[0.18em] text-amber-100 uppercase">
+                          Partial export aktif · failed{" "}
+                          {activeOutputMeta.failedPages.length} · pending{" "}
+                          {activeOutputMeta.missingPages.length}
+                        </p>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <MiniAction
+                          label="Download partial .md"
+                          subtle
+                          disabled={!activeJob || !canDownloadMarkdown}
+                          onClick={() => {
+                            if (!activeJob || !canDownloadMarkdown) {
+                              return
+                            }
+
+                            window.location.assign(
+                              buildOutputDownloadUrl(
+                                activeJob.id,
+                                "markdown",
+                                true
+                              )
+                            )
+                          }}
+                        />
+                      </div>
                       {isDetailSyncing && (
                         <p className="mt-3 text-[11px] tracking-[0.18em] text-stone-500 uppercase">
                           Syncing backend output...
@@ -1423,6 +1576,22 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                       <pre className="mt-4 overflow-x-auto font-mono text-xs leading-6 whitespace-pre-wrap text-stone-300">
                         {activeDetail?.outputPreview.text}
                       </pre>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <MiniAction
+                          label="Download partial .txt"
+                          subtle
+                          disabled={!activeJob || !canDownloadText}
+                          onClick={() => {
+                            if (!activeJob || !canDownloadText) {
+                              return
+                            }
+
+                            window.location.assign(
+                              buildOutputDownloadUrl(activeJob.id, "text", true)
+                            )
+                          }}
+                        />
+                      </div>
                       {(outputSources[activeJob?.id ?? ""]?.tesseractPages
                         .length ?? 0) > 0 ? (
                         <div className="mt-4 border-t border-white/10 pt-4">

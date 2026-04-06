@@ -10,9 +10,12 @@ export function statusTone(status: string) {
     case "Queued":
     case "Waiting":
       return "border-amber-400/30 bg-amber-500/15 text-amber-100"
+    case "Paused":
+      return "border-violet-400/30 bg-violet-500/15 text-violet-100"
     case "Partial success":
     case "Needs review":
       return "border-orange-400/30 bg-orange-500/15 text-orange-100"
+    case "Cancelled":
     case "Compared":
     case "Done":
     case "Ready":

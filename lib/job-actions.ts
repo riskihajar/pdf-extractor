@@ -20,9 +20,12 @@ import {
   reserveNextJobId,
   retryPageById,
   retryJobById,
+  pauseJobById,
+  cancelJobById,
   shouldAutoRefreshJobPages,
   startAllStoredJobs,
   startJobById,
+  overrideCompareWinnerByPage,
 } from "@/lib/job-store"
 import { attachPagePreviewUrl } from "@/lib/page-preview"
 import { preparePdfPipeline } from "@/lib/pdf-pipeline"
@@ -88,6 +91,23 @@ export type RetryPageResponse = {
   retriedPage: JobDetail["pages"][number]
 }
 
+export type JobControlResponse = {
+  job: JobRecord
+  detail: JobDetail
+}
+
+export type OverrideCompareWinnerRequest = {
+  jobId: string
+  page: string
+  winner: "LLM" | "Tesseract" | "auto"
+}
+
+export type OverrideCompareWinnerResponse = {
+  job: JobRecord
+  detail: JobDetail
+  compareRow: JobDetail["compareRows"][number]
+}
+
 export type GetJobResponse = {
   job: JobRecord
   detail: JobDetail
@@ -138,6 +158,10 @@ export type GetJobOutputResponse = {
   output: OutputFormat
   preview: JobDetail["outputPreview"]
   generatedAt: string | null
+  isPartial?: boolean
+  failedPages?: string[]
+  missingPages?: string[]
+  winnerOverrides?: string[]
   sources?: {
     tesseractPages: Array<{
       page: string
@@ -148,6 +172,7 @@ export type GetJobOutputResponse = {
     page: string
     winner: "LLM" | "Tesseract" | "Tie"
     reason?: string
+    overridden?: boolean
     scores?: {
       llm: number
       tesseract: number
@@ -260,6 +285,24 @@ export function retryPage({
   pageId,
 }: RetryPageRequest): RetryPageResponse | null {
   return retryPageById({ pageId })
+}
+
+export function pauseJob({
+  jobId,
+}: StartJobRequest): JobControlResponse | null {
+  return pauseJobById({ jobId })
+}
+
+export function cancelJob({
+  jobId,
+}: StartJobRequest): JobControlResponse | null {
+  return cancelJobById({ jobId })
+}
+
+export function overrideCompareWinner(
+  request: OverrideCompareWinnerRequest
+): OverrideCompareWinnerResponse | null {
+  return overrideCompareWinnerByPage(request)
 }
 
 export function getJobLogs(jobId: string): GetJobLogsResponse | null {
