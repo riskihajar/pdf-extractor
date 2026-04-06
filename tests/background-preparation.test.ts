@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { createJobDetail } from "@/lib/dashboard-data"
+import { createJobDetail, initialJobDetails } from "@/lib/dashboard-data"
 import { POST as startJobRoute } from "@/app/api/jobs/start/route"
 import { POST as uploadJobsRoute } from "@/app/api/jobs/upload/route"
 import { getJob, getJobs } from "@/lib/job-actions"
@@ -115,6 +115,8 @@ test("llm-only lane stores vision output into preview", async () => {
   process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
   process.env.LLM_MODEL = "gpt-vision"
   process.env.LLM_API_KEY = "secret"
+  process.env.LLM_API_STYLE = "responses"
+  process.env.LLM_API_STYLE = "responses"
 
   const uploadResponse = await uploadJobsRoute(
     new Request("http://localhost/api/jobs/upload", {
@@ -179,19 +181,20 @@ test("llm-only lane stores vision output into preview", async () => {
   process.env.LLM_BASE_URL = previousBaseUrl
   process.env.LLM_MODEL = previousModel
   process.env.LLM_API_KEY = previousApiKey
+  delete process.env.LLM_API_STYLE
+  delete process.env.LLM_API_STYLE
 })
 
 test("compare lane stores both OCR and LLM summaries with winner", async () => {
-  const previousBaseUrl = process.env.LLM_BASE_URL
-  const previousModel = process.env.LLM_MODEL
-  const previousApiKey = process.env.LLM_API_KEY
+  const { runPreparedJobsOnce } = await import("@/lib/job-store")
+  const originalImagePath = initialJobDetails["job-1"]?.pages[0]?.imagePath
 
-  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
-  process.env.LLM_MODEL = "gpt-vision"
-  process.env.LLM_API_KEY = "secret"
+  if (initialJobDetails["job-1"]?.pages[0]) {
+    initialJobDetails["job-1"].pages[0]!.imagePath =
+      "/tmp/mock-compare-page-1.png"
+  }
 
-  const { runWorkers } = await import("@/lib/job-actions")
-  await runWorkers({
+  await runPreparedJobsOnce({
     llmRunner: async ({ imageUrl }) => ({
       text: `LLM rich text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
@@ -236,22 +239,21 @@ test("compare lane stores both OCR and LLM summaries with winner", async () => {
     /OCR \+ vision compare execution/
   )
 
-  process.env.LLM_BASE_URL = previousBaseUrl
-  process.env.LLM_MODEL = previousModel
-  process.env.LLM_API_KEY = previousApiKey
+  if (initialJobDetails["job-1"]?.pages[0]) {
+    initialJobDetails["job-1"].pages[0]!.imagePath = originalImagePath
+  }
 })
 
 test("compare lane chooses Tesseract when LLM output looks low confidence", async () => {
-  const previousBaseUrl = process.env.LLM_BASE_URL
-  const previousModel = process.env.LLM_MODEL
-  const previousApiKey = process.env.LLM_API_KEY
+  const { runPreparedJobsOnce } = await import("@/lib/job-store")
+  const originalImagePath = initialJobDetails["job-1"]?.pages[0]?.imagePath
 
-  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
-  process.env.LLM_MODEL = "gpt-vision"
-  process.env.LLM_API_KEY = "secret"
+  if (initialJobDetails["job-1"]?.pages[0]) {
+    initialJobDetails["job-1"].pages[0]!.imagePath =
+      "/tmp/mock-compare-page-1.png"
+  }
 
-  const { runWorkers } = await import("@/lib/job-actions")
-  await runWorkers({
+  await runPreparedJobsOnce({
     llmRunner: async () => ({
       text: "unclear ???",
       payload: {
@@ -282,9 +284,9 @@ test("compare lane chooses Tesseract when LLM output looks low confidence", asyn
     true
   )
 
-  process.env.LLM_BASE_URL = previousBaseUrl
-  process.env.LLM_MODEL = previousModel
-  process.env.LLM_API_KEY = previousApiKey
+  if (initialJobDetails["job-1"]?.pages[0]) {
+    initialJobDetails["job-1"].pages[0]!.imagePath = originalImagePath
+  }
 })
 
 test("tesseract-only lane stores OCR text into output preview", async () => {

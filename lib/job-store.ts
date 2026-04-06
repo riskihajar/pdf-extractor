@@ -420,6 +420,10 @@ function countPendingPages(detail: Pick<JobDetail, "pages">) {
   ).length
 }
 
+function hasRealPageArtifacts(detail: Pick<JobDetail, "pages">) {
+  return detail.pages.every((page) => Boolean(page.imagePath))
+}
+
 function buildWorkerProcessedPreview(job: JobRecord, detail: JobDetail) {
   const completedPages = detail.pages.filter(
     (page) => page.status === "Compared"
@@ -2312,19 +2316,18 @@ export async function runPreparedJobsOnce(
       continue
     }
 
-    if (
-      job.mode === "Both compare" &&
-      options.llmRunner &&
-      options.tesseractRunner
-    ) {
+    if (job.mode === "Both compare" && hasRealPageArtifacts(detail)) {
+      const llmRunner = options.llmRunner ?? runLlmPage
+      const tesseractRunner = options.tesseractRunner ?? runTesseractPage
+
       processedJobs.push(
-        await applyCompareWorkerRun(
-          job,
-          detail,
-          options.llmRunner ?? runLlmPage,
-          options.tesseractRunner ?? runTesseractPage
-        )
+        await applyCompareWorkerRun(job, detail, llmRunner, tesseractRunner)
       )
+      continue
+    }
+
+    if (job.mode === "Both compare") {
+      processedJobs.push(applyWorkerRun(job, detail))
       continue
     }
 
