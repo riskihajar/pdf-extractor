@@ -441,21 +441,32 @@ Required actions:
 
 ## 19. Internal API Draft
 
-Route yang sudah ada di prototype saat ini:
+Route yang sudah ada di repository saat ini:
 
 - `GET /api/config/llm`
+- `POST /api/config/llm/test`
+- `GET /api/config/tesseract`
+- `POST /api/config/tesseract/test`
+- `GET /api/jobs`
+- `GET /api/jobs/:id`
+- `GET /api/jobs/:id/pages`
+- `GET /api/jobs/:id/output`
+- `GET /api/jobs/:id/output/download?format=markdown|text`
+- `GET /api/jobs/:id/logs`
 - `POST /api/jobs/upload`
 - `POST /api/jobs/start`
 - `POST /api/jobs/start-all`
-
-Route yang masih dibutuhkan berikutnya:
-
-- `GET /api/jobs`
-- `GET /api/jobs/:id`
 - `POST /api/jobs/:id/retry`
 - `POST /api/pages/:id/retry`
-- `GET /api/jobs/:id/output`
-- `GET /api/jobs/:id/logs`
+- `GET /api/workers`
+- `POST /api/workers/run`
+- `POST /api/workers/drain`
+
+Route tambahan yang masih dibutuhkan berikutnya:
+
+- route cancel/pause job,
+- route manual winner override per halaman,
+- route partial export atau export dengan status partial yang eksplisit.
 
 ## 20. Runtime Configuration Requirements
 

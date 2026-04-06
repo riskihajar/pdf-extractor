@@ -37,7 +37,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tampilkan page-level monitor
 - [x] Tampilkan diagnostics/log panel
 - [x] Pecah dashboard ke komponen reusable
-- [ ] Pecah `dashboard-shell` lebih lanjut ke section component yang lebih kecil
+- [~] `dashboard-shell` sudah memanfaatkan helper/component reusable, tetapi section-level split lebih lanjut masih tersisa
 
 ## 4. Upload Flow
 
@@ -140,8 +140,8 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 
 - [x] Preview UI untuk `.md`
 - [x] Preview UI untuk `.txt`
-- [~] Generate markdown nyata dari hasil extraction
-- [~] Generate text nyata dari hasil extraction
+- [x] Generate markdown nyata dari hasil extraction
+- [x] Generate text nyata dari hasil extraction
 - [x] Download output final
 - [ ] Partial export jika ada halaman gagal
 
@@ -167,7 +167,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan test integration-style ringan untuk wiring polling/refresh tab `Pages` tanpa browser stack tambahan
 - [x] Tambahkan test upload/render pipeline nyata untuk PDF lokal dev
 - [x] Tambahkan test validasi upload PDF multipart dan error terstruktur
-- [ ] Tambahkan smoke test untuk flow utama dashboard
+- [ ] Tambahkan smoke test end-to-end untuk flow utama dashboard
 
 ## 15. Immediate Next Priorities
 
