@@ -120,7 +120,7 @@ Yang masih mock atau draft:
 8. Hasil per halaman disimpan per engine.
 9. Jika mode `Both`, hasil LLM dan Tesseract tersedia untuk dibandingkan.
 10. Sistem mengagregasi hasil halaman menjadi output final file.
-11. User dapat preview, melihat log, retry, dan download hasil akhir.
+11. User dapat preview, melihat log, retry, pause/cancel job, meninjau diff compare, override winner per halaman, dan download hasil akhir.
 
 ## 11. Pipeline Design
 
@@ -255,14 +255,16 @@ Kekurangan:
 
 - kedua engine dijalankan pada halaman yang sama,
 - hasil disimpan terpisah,
-- UI menampilkan perbandingan agar user dapat mengevaluasi kualitas.
+- UI menampilkan perbandingan agar user dapat mengevaluasi kualitas,
+- compare view menyediakan diff token-level ringan, full-text kedua engine, dan manual winner override per halaman.
 
-### 14.4 Future Fallback Mode
+### 14.4 Tesseract Fallback Mode
 
-Fitur lanjutan yang direkomendasikan:
+Mode yang sekarang mulai didukung di repository:
 
 - Tesseract dijalankan terlebih dahulu,
 - jika hasil buruk atau confidence rendah, task LLM dibuat sebagai fallback,
+- hasil fallback dapat menggantikan winner pada halaman yang bermasalah,
 - sistem menghemat biaya tanpa mengorbankan kualitas pada dokumen sulit.
 
 ## 15. Output Requirements
@@ -464,9 +466,9 @@ Route yang sudah ada di repository saat ini:
 
 Route tambahan yang masih dibutuhkan berikutnya:
 
-- route cancel/pause job,
-- route manual winner override per halaman,
-- route partial export atau export dengan status partial yang eksplisit.
+- compare diff viewer yang lebih kaya dari token-level ringan saat ini,
+- route/reset flow untuk membatalkan override massal atau kembali ke auto untuk banyak halaman sekaligus,
+- observability fallback yang lebih eksplisit per halaman dan agregasi metrik fallback.
 
 ## 20. Runtime Configuration Requirements
 

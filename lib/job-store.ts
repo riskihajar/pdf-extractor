@@ -223,6 +223,8 @@ type JobCompareRow = {
   winner: JobDetail["compareRows"][number]["winner"]
   llm_summary: string
   tesseract_summary: string
+  llm_full_text?: string | null
+  tesseract_full_text?: string | null
   winner_reason?: string | null
   overridden?: number | null
   llm_score?: number | null
@@ -254,7 +256,7 @@ const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
   join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
-const JOB_STORE_SCHEMA_VERSION = 9
+const JOB_STORE_SCHEMA_VERSION = 10
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -528,6 +530,60 @@ function buildCompareOutputPreview(
   }
 }
 
+function splitWords(value: string) {
+  return value
+    .split(/(\s+)/)
+    .map((part) => (part.trim() === "" ? part : part))
+    .filter((part) => part.length > 0)
+}
+
+function buildDiffSegments(llmText: string, tesseractText: string) {
+  const llmTokens = splitWords(llmText)
+  const tesseractTokens = splitWords(tesseractText)
+  const length = Math.max(llmTokens.length, tesseractTokens.length)
+  const segments: Array<{
+    type: "same" | "llm-only" | "tesseract-only"
+    value: string
+  }> = []
+
+  for (let index = 0; index < length; index += 1) {
+    const llmToken = llmTokens[index] ?? ""
+    const tesseractToken = tesseractTokens[index] ?? ""
+
+    if (llmToken === tesseractToken) {
+      if (llmToken) {
+        segments.push({ type: "same", value: llmToken })
+      }
+      continue
+    }
+
+    if (llmToken) {
+      segments.push({ type: "llm-only", value: llmToken })
+    }
+
+    if (tesseractToken) {
+      segments.push({ type: "tesseract-only", value: tesseractToken })
+    }
+  }
+
+  return segments
+}
+
+function shouldFallbackToLlm(tesseractText: string) {
+  const normalized = tesseractText.trim()
+
+  if (!normalized) {
+    return true
+  }
+
+  if (/\?{3,}|\bunclear\b|\bunknown\b/i.test(normalized)) {
+    return true
+  }
+
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length
+  return wordCount < 4
+}
+
 function chooseCompareWinner(llmText: string, tesseractText: string) {
   const { llm, tesseract } = scoreCompareOutputs(llmText, tesseractText)
   return llm >= tesseract ? "LLM" : "Tesseract"
@@ -797,7 +853,8 @@ function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
 async function applyTesseractWorkerRun(
   job: JobRecord,
   detail: JobDetail,
-  runner: TesseractRunner
+  runner: TesseractRunner,
+  llmRunner?: LlmRunner
 ): Promise<JobMutation> {
   const outputs: string[] = []
   const nextPages = detail.pages.map((page) => ({ ...page }))
@@ -813,14 +870,42 @@ async function applyTesseractWorkerRun(
 
     const imagePath = page.imagePath ?? `/tmp/${job.id}-${index + 1}.png`
     const result = await runner(imagePath)
-    outputs.push(`### ${page.page}\n\n${result.text}`)
+    let resolvedText = result.text
+    let usedFallback = false
+
+    if (shouldFallbackToLlm(result.text) && page.imagePath) {
+      try {
+        const imageDataUrl = await readImageDataUrl(page.imagePath)
+        const fallback = llmRunner
+          ? await llmRunner({
+              imageUrl: page.imagePath,
+              imageDataUrl,
+              prompt: `Fallback extraction for ${page.page} after low-confidence Tesseract OCR`,
+            })
+          : await runLlmPage({
+              imageUrl: page.imagePath,
+              imageDataUrl,
+              prompt: `Fallback extraction for ${page.page} after low-confidence Tesseract OCR`,
+            })
+
+        resolvedText = fallback.text
+        usedFallback = true
+      } catch {
+        usedFallback = false
+      }
+    }
+
+    outputs.push(`### ${page.page}\n\n${resolvedText}`)
 
     nextPages[index] = {
       ...page,
       imagePath,
+      llm: usedFallback ? "Done" : page.llm,
       tesseract: "Done",
       status: "Compared",
-      note: `OCR: ${result.text}`,
+      note: usedFallback
+        ? `OCR: ${resolvedText} [fallback: LLM]`
+        : `OCR: ${resolvedText}`,
     }
   }
 
@@ -863,14 +948,40 @@ async function applyTesseractWorkerRun(
           .filter((page) => page.status === "Compared")
           .map((page) => `[${lane}] OCR completed for ${page.page}`),
         `Worker tick consumed ${nextJob.name} via ${lane} with real Tesseract execution`,
+        nextPages.some((page) => /fallback: LLM/.test(page.note))
+          ? `[${lane}] low-confidence OCR triggered LLM fallback on selected pages`
+          : null,
         ...detail.events,
-      ].slice(0, 12),
+      ]
+        .filter(Boolean)
+        .slice(0, 12) as string[],
       outputPreview: buildTesseractOutputPreview(nextJob, outputs),
       compareRows: detail.compareRows.map((row, index) => ({
-        ...row,
-        tesseractSummary:
-          outputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
-          row.tesseractSummary,
+        ...(function mapCompareRow() {
+          const outputText = outputs[index]?.replace(/^### .*\n\n/, "")
+          const pageState = nextPages[index]
+          const fallbackApplied = /fallback: LLM/.test(pageState?.note ?? "")
+          const llmText = fallbackApplied
+            ? outputText || row.llmFullText || row.llmSummary
+            : row.llmFullText || row.llmSummary
+          const tesseractText =
+            outputText || row.tesseractFullText || row.tesseractSummary
+
+          return {
+            ...row,
+            winner: fallbackApplied ? ("LLM" as const) : row.winner,
+            reason: fallbackApplied
+              ? "Tesseract low-confidence memicu fallback ke LLM dan hasil fallback dipakai sebagai winner"
+              : row.reason,
+            llmSummary: fallbackApplied
+              ? (outputText?.slice(0, 120) ?? row.llmSummary)
+              : row.llmSummary,
+            tesseractSummary: outputText?.slice(0, 120) ?? row.tesseractSummary,
+            llmFullText: llmText,
+            tesseractFullText: tesseractText,
+            diffSegments: buildDiffSegments(llmText, tesseractText),
+          }
+        })(),
       })),
       pipeline: detail.pipeline.map((step, index) => {
         if (index === 2) {
@@ -1023,6 +1134,14 @@ async function applyLlmWorkerRun(
         llmSummary:
           outputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
           row.llmSummary,
+        llmFullText:
+          outputs[index]?.replace(/^### .*\n\n/, "") || row.llmFullText,
+        diffSegments: buildDiffSegments(
+          outputs[index]?.replace(/^### .*\n\n/, "") ||
+            row.llmFullText ||
+            row.llmSummary,
+          row.tesseractFullText ?? row.tesseractSummary
+        ),
       })),
       pipeline: detail.pipeline.map((step, index) => {
         if (index === 2) {
@@ -1170,8 +1289,14 @@ async function applyCompareWorkerRun(
           overridden: row.overridden ?? false,
           scores: scoreCompareOutputs(llmText, tesseractText),
           llmSummary: processedRow?.llm.slice(0, 120) ?? row.llmSummary,
+          llmFullText: processedRow?.llm ?? row.llmFullText ?? row.llmSummary,
           tesseractSummary:
             processedRow?.tesseract.slice(0, 120) ?? row.tesseractSummary,
+          tesseractFullText:
+            processedRow?.tesseract ??
+            row.tesseractFullText ??
+            row.tesseractSummary,
+          diffSegments: buildDiffSegments(llmText, tesseractText),
         }
       }),
       pipeline: detail.pipeline.map((step, index) => {
@@ -1272,8 +1397,8 @@ function writeNormalizedDetail(
   normalized.compareRows.forEach((row, index) => {
     db.prepare(
       `INSERT INTO job_compare_rows (
-        job_id, position, page_label, winner, llm_summary, tesseract_summary, winner_reason, overridden, llm_score, tesseract_score
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        job_id, position, page_label, winner, llm_summary, tesseract_summary, llm_full_text, tesseract_full_text, winner_reason, overridden, llm_score, tesseract_score
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       job.id,
       index,
@@ -1281,6 +1406,8 @@ function writeNormalizedDetail(
       row.winner,
       row.llmSummary,
       row.tesseractSummary,
+      row.llmFullText ?? row.llmSummary,
+      row.tesseractFullText ?? row.tesseractSummary,
       row.reason ?? null,
       row.overridden ? 1 : 0,
       row.scores?.llm ?? null,
@@ -1616,6 +1743,30 @@ function applySchemaMigrations(db: DatabaseSync) {
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(9, new Date().toISOString())
   }
+
+  if (currentVersion < 10) {
+    const compareColumns = db
+      .prepare(`PRAGMA table_info(job_compare_rows)`)
+      .all() as Array<{
+      name: string
+    }>
+
+    if (!compareColumns.some((column) => column.name === "llm_full_text")) {
+      db.exec(`ALTER TABLE job_compare_rows ADD COLUMN llm_full_text TEXT`)
+    }
+
+    if (
+      !compareColumns.some((column) => column.name === "tesseract_full_text")
+    ) {
+      db.exec(
+        `ALTER TABLE job_compare_rows ADD COLUMN tesseract_full_text TEXT`
+      )
+    }
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(10, new Date().toISOString())
+  }
 }
 
 function initializeDatabase(db: DatabaseSync) {
@@ -1687,6 +1838,8 @@ function initializeDatabase(db: DatabaseSync) {
       winner TEXT NOT NULL,
       llm_summary TEXT NOT NULL,
       tesseract_summary TEXT NOT NULL,
+      llm_full_text TEXT,
+      tesseract_full_text TEXT,
       winner_reason TEXT,
       overridden INTEGER DEFAULT 0,
       llm_score REAL,
@@ -1789,6 +1942,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
   const compareRows = db
     .prepare(
       `SELECT job_id, position, page_label, winner, llm_summary, tesseract_summary
+              , llm_full_text, tesseract_full_text
               , winner_reason, overridden, llm_score, tesseract_score
         FROM job_compare_rows
         ORDER BY job_id ASC, position ASC`
@@ -1884,6 +2038,12 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
       winner: row.winner,
       llmSummary: row.llm_summary,
       tesseractSummary: row.tesseract_summary,
+      llmFullText: row.llm_full_text ?? row.llm_summary,
+      tesseractFullText: row.tesseract_full_text ?? row.tesseract_summary,
+      diffSegments: buildDiffSegments(
+        row.llm_full_text ?? row.llm_summary,
+        row.tesseract_full_text ?? row.tesseract_summary
+      ),
       reason: row.winner_reason ?? undefined,
       overridden: Boolean(row.overridden),
       scores:
@@ -2344,6 +2504,10 @@ function applyCompareWinnerOverride(
       winner: input.winner,
       overridden: true,
       reason: `Winner diubah manual ke ${input.winner} oleh operator dashboard`,
+      diffSegments: buildDiffSegments(
+        row.llmFullText ?? row.llmSummary,
+        row.tesseractFullText ?? row.tesseractSummary
+      ),
     }
   })
 
@@ -2625,7 +2789,8 @@ export async function runPreparedJobsOnce(
         await applyTesseractWorkerRun(
           job,
           detail,
-          options.tesseractRunner ?? runTesseractPage
+          options.tesseractRunner ?? runTesseractPage,
+          options.llmRunner ?? runLlmPage
         )
       )
       continue

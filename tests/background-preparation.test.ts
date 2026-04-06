@@ -231,6 +231,15 @@ test("compare lane stores both OCR and LLM summaries with winner", async () => {
       /skor gabungan panjang/
     )
     assert.ok(compareJob.detail.compareRows[1]?.scores)
+    assert.ok(compareJob.detail.compareRows[1]?.diffSegments?.length)
+    assert.match(
+      compareJob.detail.compareRows[1]?.llmFullText ?? "",
+      /LLM rich text for/
+    )
+    assert.match(
+      compareJob.detail.compareRows[1]?.tesseractFullText ?? "",
+      /OCR text for/
+    )
     assert.equal(
       (compareJob.detail.compareRows[1]?.scores?.llm ?? 0) >=
         (compareJob.detail.compareRows[1]?.scores?.tesseract ?? 0),
@@ -359,7 +368,10 @@ test("uploaded compare job uses real compare lane artifacts and persists compare
   assert.equal(outputPayload.compareAudit?.[0]?.winner, "LLM")
   assert.match(outputPayload.preview.text, /Compare Output/)
   assert.ok(compareJob.detail.pages[0]?.imagePath)
-  assert.match(compareJob.detail.events.join("\n"), /OCR \+ vision compare execution/)
+  assert.match(
+    compareJob.detail.events.join("\n"),
+    /OCR \+ vision compare execution/
+  )
 })
 
 test("tesseract-only lane stores OCR text into output preview", async () => {

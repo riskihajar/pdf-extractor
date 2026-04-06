@@ -69,6 +69,12 @@ export type JobDetail = {
     tesseractSummary: string
     reason?: string
     overridden?: boolean
+    llmFullText?: string
+    tesseractFullText?: string
+    diffSegments?: Array<{
+      type: "same" | "llm-only" | "tesseract-only"
+      value: string
+    }>
     scores?: {
       llm: number
       tesseract: number
@@ -251,18 +257,29 @@ export const initialJobDetails: Record<string, JobDetail> = {
         winner: "Tie",
         llmSummary: "Structured table and headings preserved",
         tesseractSummary: "Clean OCR, similar content fidelity",
+        llmFullText:
+          "Structured table and headings preserved with account labels and opening balance.",
+        tesseractFullText:
+          "Clean OCR, similar content fidelity with account labels and opening balance.",
       },
       {
         page: "Page 02",
         winner: "LLM",
         llmSummary: "Handwritten annotation recognized with context",
         tesseractSummary: "Missed handwritten marginal notes",
+        llmFullText:
+          "Handwritten annotation recognized with context and linked to the nearby transaction row.",
+        tesseractFullText:
+          "Missed handwritten marginal notes and only captured the base transaction row.",
       },
       {
         page: "Page 03",
         winner: "LLM",
         llmSummary: "Fallback fills blank OCR section",
         tesseractSummary: "Returned empty extraction",
+        llmFullText:
+          "Fallback fills blank OCR section with recovered merchant name and amount.",
+        tesseractFullText: "",
       },
     ],
     pipeline: [
@@ -322,6 +339,9 @@ export const initialJobDetails: Record<string, JobDetail> = {
         winner: "LLM",
         llmSummary: "Expected to preserve invoice totals and stamps",
         tesseractSummary: "Not scheduled for this lane",
+        llmFullText:
+          "Expected to preserve invoice totals, payment stamp, and vendor notes.",
+        tesseractFullText: "Not scheduled for this lane",
       },
     ],
     pipeline: [
@@ -488,6 +508,14 @@ export function createJobDetail(job: JobRecord): JobDetail {
             ? "Queued for vision extraction"
             : "LLM lane disabled",
         tesseractSummary:
+          compareEnabled || job.mode === "Tesseract only"
+            ? "Queued for OCR extraction"
+            : "Tesseract lane disabled",
+        llmFullText:
+          compareEnabled || job.mode === "LLM only"
+            ? "Queued for vision extraction"
+            : "LLM lane disabled",
+        tesseractFullText:
           compareEnabled || job.mode === "Tesseract only"
             ? "Queued for OCR extraction"
             : "Tesseract lane disabled",

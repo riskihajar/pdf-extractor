@@ -14,7 +14,9 @@ Repository ini sekarang sudah memiliki fondasi frontend interaktif, route intern
 - mode ekstraksi `LLM only`, `Tesseract only`, dan `Both (compare)`,
 - output `.md` dan `.txt`,
 - compare result per engine,
+- diff compare viewer per halaman dengan token highlight dan full-text panel,
 - retry untuk file atau halaman yang gagal,
+- fallback otomatis dari Tesseract ke vision LLM saat OCR low-confidence,
 - observability status pipeline dari upload sampai export.
 
 ## Current Implementation Status
@@ -39,6 +41,8 @@ Yang sudah ada saat ini:
 - lane `Tesseract only` sekarang sudah menjalankan OCR nyata via binary Tesseract lokal,
 - lane `LLM only` sekarang sudah menjalankan extraction nyata via OpenAI-like `chat/completions` dengan image base64 dari artifact render,
 - compare audit trail sekarang menyimpan winner, reason, dan score per halaman,
+- compare tab sekarang punya diff viewer detail, full-text kedua engine, manual override, dan reset ke auto scoring,
+- lane `Tesseract only` sekarang bisa memicu fallback ke vision LLM saat hasil OCR kosong atau low-confidence,
 - route internal aman untuk status runtime LLM,
 - route internal connection test untuk runtime LLM dan Tesseract,
 - helper server-side untuk membaca env lokal tanpa mengekspos secret ke UI,
@@ -48,7 +52,7 @@ Yang masih belum selesai:
 
 - worker/background queue terpisah penuh di luar proses app,
 - queue runtime nyata dengan concurrency per lane,
-- export pipeline final,
+- export pipeline final selain partial export yang sudah tersedia,
 - cancel/pause job,
 - log runtime per page untuk jalur compare yang lebih eksplisit.
 
@@ -73,6 +77,8 @@ Prinsip arsitektur yang sedang dituju:
 - render PDF ke image dijalankan di backend atau worker,
 - task queue berjalan di level halaman,
 - compare mode menyimpan hasil per engine secara terpisah,
+- compare review sekarang mendukung diff token-level ringan dan manual winner override,
+- Tesseract lane dapat menaikkan halaman ke vision LLM sebagai fallback jika OCR terlihat low-confidence,
 - output akhir digabung ke format Markdown dan plain text,
 - env sensitif dibaca server-side melalui internal API, bukan langsung dari client.
 
@@ -133,6 +139,9 @@ Route internal yang sudah tersedia:
 - `GET /api/jobs/:id/logs`
 - `GET /api/jobs/:id/output`
 - `GET /api/jobs/:id/output/download?format=markdown|text`
+- `POST /api/jobs/:id/pause`
+- `POST /api/jobs/:id/cancel`
+- `POST /api/jobs/:id/compare/override`
 - `POST /api/jobs/upload`
 - `POST /api/jobs/start`
 - `POST /api/jobs/start-all`

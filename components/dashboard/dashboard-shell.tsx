@@ -119,6 +119,17 @@ function buildOutputDownloadUrl(
   return `/api/jobs/${encodeURIComponent(jobId)}/output/download?format=${format}${partial ? "&partial=1" : ""}`
 }
 
+function diffTone(type: "same" | "llm-only" | "tesseract-only") {
+  switch (type) {
+    case "llm-only":
+      return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+    case "tesseract-only":
+      return "border-amber-300/30 bg-amber-300/10 text-amber-100"
+    default:
+      return "border-white/10 bg-white/5 text-stone-300"
+  }
+}
+
 function formatRuntimeCheck(check: RuntimeConnectionCheck | null) {
   if (!check) {
     return "belum diuji"
@@ -1429,6 +1440,42 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                             ) : null}
                           </div>
                         </div>
+                        {row.diffSegments && row.diffSegments.length > 0 ? (
+                          <div className="mt-3 rounded-[1rem] border border-white/10 bg-black/20 p-3">
+                            <p className="text-[11px] tracking-[0.2em] text-stone-500 uppercase">
+                              Detailed diff
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {row.diffSegments.map((segment, index) => (
+                                <span
+                                  key={`${row.page}-diff-${index}`}
+                                  className={`rounded-full border px-2.5 py-1 text-xs ${diffTone(segment.type)}`}
+                                >
+                                  {segment.value}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                              <div className="rounded-[0.9rem] border border-cyan-300/20 bg-cyan-300/5 p-3">
+                                <p className="text-[11px] tracking-[0.18em] text-cyan-100 uppercase">
+                                  Full LLM text
+                                </p>
+                                <p className="mt-2 text-xs leading-6 text-stone-200">
+                                  {row.llmFullText ?? row.llmSummary}
+                                </p>
+                              </div>
+                              <div className="rounded-[0.9rem] border border-amber-300/20 bg-amber-300/5 p-3">
+                                <p className="text-[11px] tracking-[0.18em] text-amber-100 uppercase">
+                                  Full Tesseract text
+                                </p>
+                                <p className="mt-2 text-xs leading-6 text-stone-200">
+                                  {row.tesseractFullText ??
+                                    row.tesseractSummary}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
                         {row.reason ? (
                           <div className="mt-3 rounded-[1rem] border border-amber-300/15 bg-amber-200/5 p-3">
                             <p className="text-[11px] tracking-[0.2em] text-amber-100 uppercase">
