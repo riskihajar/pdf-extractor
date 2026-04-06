@@ -212,6 +212,10 @@ test("compare lane stores both OCR and LLM summaries with winner", async () => {
   )
   assert.equal(compareJob.detail.compareRows[0]?.winner, "LLM")
   assert.match(
+    compareJob.detail.compareRows[0]?.reason ?? "",
+    /skor gabungan panjang/
+  )
+  assert.match(
     compareJob.detail.events.join("\n"),
     /OCR \+ vision compare execution/
   )
@@ -252,6 +256,10 @@ test("compare lane chooses Tesseract when LLM output looks low confidence", asyn
 
   assert.ok(compareJob)
   assert.equal(compareJob.detail.compareRows[0]?.winner, "Tesseract")
+  assert.match(
+    compareJob.detail.compareRows[0]?.reason ?? "",
+    /LLM terlihat low-confidence/
+  )
 
   process.env.LLM_BASE_URL = previousBaseUrl
   process.env.LLM_MODEL = previousModel

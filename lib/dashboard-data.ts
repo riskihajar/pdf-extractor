@@ -59,6 +59,7 @@ export type JobDetail = {
     winner: "LLM" | "Tesseract" | "Tie"
     llmSummary: string
     tesseractSummary: string
+    reason?: string
   }>
   pipeline: Array<{
     title: string

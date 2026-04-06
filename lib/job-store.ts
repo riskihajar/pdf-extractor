@@ -195,6 +195,7 @@ type JobCompareRow = {
   winner: JobDetail["compareRows"][number]["winner"]
   llm_summary: string
   tesseract_summary: string
+  winner_reason?: string | null
 }
 
 type JobPipelineRow = {
@@ -220,7 +221,7 @@ const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
   join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
-const JOB_STORE_SCHEMA_VERSION = 6
+const JOB_STORE_SCHEMA_VERSION = 7
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -513,6 +514,34 @@ function chooseCompareWinner(llmText: string, tesseractText: string) {
     normalizedTesseract.length + tesseractWordCount * 2 - tesseractPenalty
 
   return llmScore >= tesseractScore ? "LLM" : "Tesseract"
+}
+
+function explainCompareWinner(llmText: string, tesseractText: string) {
+  const normalizedLlm = llmText.trim()
+  const normalizedTesseract = tesseractText.trim()
+
+  if (!normalizedLlm && normalizedTesseract) {
+    return "LLM kosong, jadi Tesseract menang otomatis"
+  }
+
+  if (!normalizedTesseract && normalizedLlm) {
+    return "Tesseract kosong, jadi LLM menang otomatis"
+  }
+
+  const llmLowConfidence = /\?{3,}|\bunclear\b|\bunknown\b/i.test(normalizedLlm)
+  const tesseractLowConfidence = /\?{3,}|\bunclear\b|\bunknown\b/i.test(
+    normalizedTesseract
+  )
+
+  if (llmLowConfidence && !tesseractLowConfidence) {
+    return "LLM terlihat low-confidence, Tesseract lebih stabil"
+  }
+
+  if (tesseractLowConfidence && !llmLowConfidence) {
+    return "Tesseract terlihat low-confidence, LLM lebih stabil"
+  }
+
+  return "Winner dipilih dari skor gabungan panjang, jumlah kata, dan confidence penalty"
 }
 
 function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
@@ -958,6 +987,11 @@ async function applyCompareWorkerRun(
           tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
             row.tesseractSummary
         ) as "LLM" | "Tesseract",
+        reason: explainCompareWinner(
+          llmOutputs[index]?.replace(/^### .*\n\n/, "") || row.llmSummary,
+          tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
+            row.tesseractSummary
+        ),
         llmSummary:
           llmOutputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
           row.llmSummary,
@@ -1063,15 +1097,16 @@ function writeNormalizedDetail(
   normalized.compareRows.forEach((row, index) => {
     db.prepare(
       `INSERT INTO job_compare_rows (
-        job_id, position, page_label, winner, llm_summary, tesseract_summary
-      ) VALUES (?, ?, ?, ?, ?, ?)`
+        job_id, position, page_label, winner, llm_summary, tesseract_summary, winner_reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
       job.id,
       index,
       row.page,
       row.winner,
       row.llmSummary,
-      row.tesseractSummary
+      row.tesseractSummary,
+      row.reason ?? null
     )
   })
 
@@ -1349,6 +1384,22 @@ function applySchemaMigrations(db: DatabaseSync) {
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(6, new Date().toISOString())
   }
+
+  if (currentVersion < 7) {
+    const compareColumns = db
+      .prepare(`PRAGMA table_info(job_compare_rows)`)
+      .all() as Array<{
+      name: string
+    }>
+
+    if (!compareColumns.some((column) => column.name === "winner_reason")) {
+      db.exec(`ALTER TABLE job_compare_rows ADD COLUMN winner_reason TEXT`)
+    }
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(7, new Date().toISOString())
+  }
 }
 
 function initializeDatabase(db: DatabaseSync) {
@@ -1420,6 +1471,7 @@ function initializeDatabase(db: DatabaseSync) {
       winner TEXT NOT NULL,
       llm_summary TEXT NOT NULL,
       tesseract_summary TEXT NOT NULL,
+      winner_reason TEXT,
       PRIMARY KEY (job_id, position)
     );
 
@@ -1518,6 +1570,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
   const compareRows = db
     .prepare(
       `SELECT job_id, position, page_label, winner, llm_summary, tesseract_summary
+              , winner_reason
        FROM job_compare_rows
        ORDER BY job_id ASC, position ASC`
     )
@@ -1612,6 +1665,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
       winner: row.winner,
       llmSummary: row.llm_summary,
       tesseractSummary: row.tesseract_summary,
+      reason: row.winner_reason ?? undefined,
     })
   })
 

@@ -1165,6 +1165,16 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                             ) : null}
                           </div>
                         </div>
+                        {row.reason ? (
+                          <div className="mt-3 rounded-[1rem] border border-amber-300/15 bg-amber-200/5 p-3">
+                            <p className="text-[11px] tracking-[0.2em] text-amber-100 uppercase">
+                              Winner reason
+                            </p>
+                            <p className="mt-2 text-xs leading-6 text-stone-300">
+                              {row.reason}
+                            </p>
+                          </div>
+                        ) : null}
                       </article>
                     ))}
                   </div>
