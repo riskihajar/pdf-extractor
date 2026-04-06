@@ -136,6 +136,12 @@ export type GetJobOutputResponse = {
   output: OutputFormat
   preview: JobDetail["outputPreview"]
   generatedAt: string | null
+  sources?: {
+    tesseractPages: Array<{
+      page: string
+      text: string
+    }>
+  }
 }
 
 export type GetJobPagesResponse = {

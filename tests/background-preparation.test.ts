@@ -136,10 +136,20 @@ test("tesseract-only lane stores OCR text into output preview", async () => {
   })
 
   const refreshedJob = getJob(uploadedJob.id)
+  const outputPayload = await (
+    await import("@/lib/job-actions")
+  ).getJobOutput(uploadedJob.id)
 
   assert.ok(refreshedJob)
+  assert.ok(outputPayload)
   assert.match(refreshedJob.detail.outputPreview.text, /Tesseract OCR/)
   assert.match(refreshedJob.detail.outputPreview.text, /OCR text for/)
+  assert.match(refreshedJob.detail.pages[0]?.note ?? "", /^OCR: OCR text for/)
+  assert.equal(outputPayload.sources?.tesseractPages.length, 1)
+  assert.match(
+    outputPayload.sources?.tesseractPages[0]?.text ?? "",
+    /OCR text for/
+  )
   assert.match(
     refreshedJob.detail.events.join("\n"),
     /real Tesseract execution/

@@ -39,7 +39,7 @@ test("multipart upload stores PDF metadata and render artifacts", async () => {
 
   assert.equal(response.status, 200)
   assert.ok(uploadedJob)
-  assert.equal(getJobStoreSchemaVersion(), 5)
+  assert.equal(getJobStoreSchemaVersion(), 6)
 
   const storedFile = getUploadedFileByJobId(uploadedJob.id)
   const artifacts = getRenderArtifactsByJobId(uploadedJob.id)

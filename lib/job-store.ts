@@ -47,6 +47,12 @@ export type JobOutputPayload = {
   output: OutputFormat
   preview: JobDetail["outputPreview"]
   generatedAt: string | null
+  sources?: {
+    tesseractPages: Array<{
+      page: string
+      text: string
+    }>
+  }
 }
 
 export type JobPagesPayload = {
@@ -154,6 +160,7 @@ type JobPageRow = {
   image_path?: string | null
   llm_state: JobDetail["pages"][number]["llm"]
   tesseract_state: JobDetail["pages"][number]["tesseract"]
+  tesseract_text?: string | null
   status: JobDetail["pages"][number]["status"]
   note: string
 }
@@ -211,7 +218,7 @@ const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
   join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
-const JOB_STORE_SCHEMA_VERSION = 5
+const JOB_STORE_SCHEMA_VERSION = 6
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -589,7 +596,7 @@ async function applyTesseractWorkerRun(
       imagePath,
       tesseract: "Done",
       status: "Compared",
-      note: `${page.page} selesai diekstrak oleh Tesseract runtime nyata`,
+      note: `OCR: ${result.text}`,
     }
   }
 
@@ -720,8 +727,8 @@ function writeNormalizedDetail(
   normalized.pages.forEach((page, index) => {
     db.prepare(
       `INSERT INTO job_pages (
-        job_id, page_id, position, page_label, image_path, llm_state, tesseract_state, status, note
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        job_id, page_id, position, page_label, image_path, llm_state, tesseract_state, tesseract_text, status, note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       job.id,
       buildPageId(job.id, index),
@@ -730,6 +737,7 @@ function writeNormalizedDetail(
       page.imagePath ?? null,
       page.llm,
       page.tesseract,
+      page.note.startsWith("OCR:") ? page.note.slice(5).trim() : null,
       page.status,
       page.note
     )
@@ -1008,6 +1016,22 @@ function applySchemaMigrations(db: DatabaseSync) {
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(5, new Date().toISOString())
   }
+
+  if (currentVersion < 6) {
+    const jobPageColumns = db
+      .prepare(`PRAGMA table_info(job_pages)`)
+      .all() as Array<{
+      name: string
+    }>
+
+    if (!jobPageColumns.some((column) => column.name === "tesseract_text")) {
+      db.exec(`ALTER TABLE job_pages ADD COLUMN tesseract_text TEXT`)
+    }
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(6, new Date().toISOString())
+  }
 }
 
 function initializeDatabase(db: DatabaseSync) {
@@ -1066,6 +1090,7 @@ function initializeDatabase(db: DatabaseSync) {
       image_path TEXT,
       llm_state TEXT NOT NULL,
       tesseract_state TEXT NOT NULL,
+      tesseract_text TEXT,
       status TEXT NOT NULL,
       note TEXT NOT NULL,
       PRIMARY KEY (job_id, position)
@@ -1168,6 +1193,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
   const pageRows = db
     .prepare(
       `SELECT job_id, page_id, position, page_label, llm_state, tesseract_state, status, note
+              , image_path, tesseract_text
        FROM job_pages
        ORDER BY job_id ASC, position ASC`
     )
@@ -1250,7 +1276,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
       llm: row.llm_state,
       tesseract: row.tesseract_state,
       status: row.status,
-      note: row.note,
+      note: row.tesseract_text ? `OCR: ${row.tesseract_text}` : row.note,
     })
   })
 
@@ -1939,6 +1965,14 @@ export function getJobOutputById(jobId: string): JobOutputPayload | null {
       text: outputRow?.text ?? result.detail.outputPreview.text,
     },
     generatedAt: outputRow?.generated_at ?? null,
+    sources: {
+      tesseractPages: result.detail.pages
+        .filter((page) => page.note.startsWith("OCR: "))
+        .map((page) => ({
+          page: page.page,
+          text: page.note.slice(5).trim(),
+        })),
+    },
   }
 }
 

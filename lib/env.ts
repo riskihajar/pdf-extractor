@@ -4,6 +4,7 @@ export type LlmRuntimeConfig = {
   reasoningEffort: string
   hasApiKey: boolean
   examplePdfPath?: string
+  imageInputMode: string
 }
 
 export type TesseractRuntimeConfig = {
@@ -19,6 +20,7 @@ export function getLlmRuntimeConfig(): LlmRuntimeConfig {
     reasoningEffort: process.env.LLM_REASONING_EFFORT ?? "medium",
     hasApiKey: Boolean(process.env.LLM_API_KEY),
     examplePdfPath: process.env.EXAMPLE_PDF_PATH_TO_EXTRACT,
+    imageInputMode: process.env.LLM_IMAGE_INPUT_MODE ?? "data_url",
   }
 }
 

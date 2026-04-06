@@ -58,6 +58,13 @@ type RuntimeStatus = {
   hasExamplePdfPath: boolean
 }
 
+type OutputSourceSnapshot = {
+  tesseractPages: Array<{
+    page: string
+    text: string
+  }>
+}
+
 type WorkerDiagnostics = {
   workers: Array<{
     queue: string
@@ -104,6 +111,9 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null)
   const [workerDiagnostics, setWorkerDiagnostics] =
     useState<WorkerDiagnostics | null>(null)
+  const [outputSources, setOutputSources] = useState<
+    Record<string, OutputSourceSnapshot>
+  >({})
   const [isDetailSyncing, setIsDetailSyncing] = useState(false)
   const [isRunningWorkerTick, setIsRunningWorkerTick] = useState(false)
 
@@ -219,6 +229,11 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
 
         setJobDetails((current) => {
           const base = current[job.id] ?? createJobDetail(job)
+
+          setOutputSources((sources) => ({
+            ...sources,
+            [job.id]: payload.sources ?? { tesseractPages: [] },
+          }))
 
           return {
             ...current,
@@ -1143,6 +1158,11 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                             <p className="mt-2 text-sm leading-6 text-stone-200">
                               {row.tesseractSummary}
                             </p>
+                            {row.tesseractSummary.startsWith("OCR text") ? (
+                              <p className="mt-2 text-[11px] tracking-[0.18em] text-cyan-200 uppercase">
+                                Persisted OCR result
+                              </p>
+                            ) : null}
                           </div>
                         </div>
                       </article>
@@ -1182,6 +1202,31 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                       <pre className="mt-4 overflow-x-auto font-mono text-xs leading-6 whitespace-pre-wrap text-stone-300">
                         {activeDetail?.outputPreview.text}
                       </pre>
+                      {(outputSources[activeJob?.id ?? ""]?.tesseractPages
+                        .length ?? 0) > 0 ? (
+                        <div className="mt-4 border-t border-white/10 pt-4">
+                          <p className="text-[11px] tracking-[0.2em] text-cyan-200 uppercase">
+                            Persisted OCR pages
+                          </p>
+                          <div className="mt-3 space-y-2">
+                            {outputSources[
+                              activeJob?.id ?? ""
+                            ]?.tesseractPages.map((page) => (
+                              <div
+                                key={page.page}
+                                className="rounded-[1rem] border border-cyan-300/15 bg-cyan-300/5 p-3"
+                              >
+                                <p className="text-xs font-medium text-cyan-50">
+                                  {page.page}
+                                </p>
+                                <p className="mt-2 text-xs leading-6 text-stone-300">
+                                  {page.text}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </article>
                   </div>
                 )}
