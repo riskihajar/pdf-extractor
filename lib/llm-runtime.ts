@@ -15,6 +15,13 @@ export type LlmPageRequest = {
   prompt: string
 }
 
+export type LlmPageResult = {
+  text: string
+  payload: ReturnType<typeof buildLlmPagePayload>
+}
+
+export type LlmRunner = (request: LlmPageRequest) => Promise<LlmPageResult>
+
 export function getLlmRuntimeStatus(): LlmRuntimeStatus {
   const config = getLlmRuntimeConfig()
 
@@ -54,6 +61,37 @@ export function buildLlmPagePayload(request: LlmPageRequest) {
         ],
       },
     ],
+  }
+}
+
+export async function runLlmPage(
+  request: LlmPageRequest,
+  fetchImpl: typeof fetch = fetch
+): Promise<LlmPageResult> {
+  const config = getLlmRuntimeConfig()
+  const payload = buildLlmPagePayload(request)
+
+  const response = await fetchImpl(config.baseUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.LLM_API_KEY ?? ""}`,
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(`LLM runtime request failed with status ${response.status}`)
+  }
+
+  const result = (await response.json()) as {
+    output_text?: string
+    text?: string
+  }
+
+  return {
+    text: result.output_text ?? result.text ?? "",
+    payload,
   }
 }
 

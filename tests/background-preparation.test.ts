@@ -83,12 +83,66 @@ test("worker run route consumes prepared jobs once", async () => {
   assert.ok(payload.processedJobs.length > 0)
   assert.ok(refreshedJob)
   assert.equal(refreshedJob.job.status, "Processing")
-  assert.match(refreshedJob.detail.events[0] ?? "", /^\[extract-llm\] /)
   assert.match(
-    refreshedJob.detail.events[1] ?? "",
-    /^Worker tick consumed .* via extract-llm with concurrency /
+    refreshedJob.detail.events[0] ?? "",
+    /^Worker tick consumed .* via extract-llm with vision LLM execution/
   )
-  assert.match(refreshedJob.detail.outputPreview.markdown, /Worker output/)
+  assert.match(
+    refreshedJob.detail.outputPreview.markdown,
+    /Vision LLM Output|Worker output/
+  )
+})
+
+test("llm-only lane stores vision output into preview", async () => {
+  const uploadResponse = await uploadJobsRoute(
+    new Request("http://localhost/api/jobs/upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        files: ["vision-real.pdf"],
+        mode: "LLM only",
+        output: "Markdown",
+      }),
+    })
+  )
+  const uploadPayload = await uploadResponse.json()
+  const uploadedJob = uploadPayload.jobs.find(
+    (job: { mode: string }) => job.mode === "LLM only"
+  )
+
+  assert.ok(uploadedJob)
+
+  await startJobRoute(
+    new Request("http://localhost/api/jobs/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jobId: uploadedJob.id }),
+    })
+  )
+
+  const { runWorkers } = await import("@/lib/job-actions")
+  await runWorkers({
+    llmRunner: async ({ imageUrl }) => ({
+      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      payload: {
+        model: "gpt-vision",
+        reasoningEffort: "medium",
+        inputMode: "url",
+        messages: [],
+      },
+    }),
+  })
+
+  const refreshedJob = getJob(uploadedJob.id)
+
+  assert.ok(refreshedJob)
+  assert.match(refreshedJob.detail.outputPreview.text, /Vision LLM Output/)
+  assert.match(refreshedJob.detail.outputPreview.text, /LLM text for/)
+  assert.match(refreshedJob.detail.events.join("\n"), /vision LLM execution/)
 })
 
 test("tesseract-only lane stores OCR text into output preview", async () => {
@@ -157,6 +211,14 @@ test("tesseract-only lane stores OCR text into output preview", async () => {
 })
 
 test("tesseract lane uses wider mock concurrency than compare lane", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+
   await runWorkersRoute()
 
   const compareJob = getJob("job-1")
@@ -192,6 +254,15 @@ test("tesseract lane uses wider mock concurrency than compare lane", async () =>
 
   const { runWorkers } = await import("@/lib/job-actions")
   await runWorkers({
+    llmRunner: async ({ imageUrl }) => ({
+      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      payload: {
+        model: "gpt-vision",
+        reasoningEffort: "medium",
+        inputMode: "url",
+        messages: [],
+      },
+    }),
     tesseractRunner: async (imagePath) => ({
       text: `OCR text for ${imagePath.split("/").pop()}`,
       command: "fake-tesseract",
@@ -225,4 +296,8 @@ test("tesseract lane uses wider mock concurrency than compare lane", async () =>
     ocrJob.detail.pages.filter((page) => page.status === "Extracting").length,
     2
   )
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
 })

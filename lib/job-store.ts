@@ -12,6 +12,7 @@ import {
   type OutputFormat,
 } from "@/lib/dashboard-data"
 import type { PipelineResult, UploadedPdfMetadata } from "@/lib/pdf-pipeline"
+import { runLlmPage, type LlmRunner } from "@/lib/llm-runtime"
 import { runTesseractPage, type TesseractRunner } from "@/lib/tesseract-runtime"
 
 export type JobStoreState = {
@@ -112,6 +113,7 @@ type WorkerRunMutation = {
 }
 
 type WorkerRunOptions = {
+  llmRunner?: LlmRunner
   tesseractRunner?: TesseractRunner
 }
 
@@ -451,6 +453,15 @@ function buildTesseractOutputPreview(job: JobRecord, outputs: string[]) {
   }
 }
 
+function buildLlmOutputPreview(job: JobRecord, outputs: string[]) {
+  const body = outputs.length > 0 ? outputs.join("\n\n") : "No LLM output yet"
+
+  return {
+    markdown: `# ${job.name}\n\n## Vision LLM Output\n\n${body}`,
+    text: `${job.name}\n\nVision LLM Output\n\n${body}`,
+  }
+}
+
 function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
   const concurrency = getWorkerConcurrency(job)
   const lane = getWorkerLaneLabel(job)
@@ -675,6 +686,124 @@ async function applyTesseractWorkerRun(
               nextJob.status === "Completed"
                 ? "Preview output terisi dari hasil OCR nyata"
                 : "Preview output mulai terisi dari halaman yang sudah selesai OCR",
+            state: nextJob.status === "Completed" ? "done" : "active",
+          }
+        }
+
+        return step
+      }),
+    },
+  }
+}
+
+async function applyLlmWorkerRun(
+  job: JobRecord,
+  detail: JobDetail,
+  runner: LlmRunner
+): Promise<JobMutation> {
+  const outputs: string[] = []
+  const nextPages = detail.pages.map((page) => ({ ...page }))
+  const concurrency = getWorkerConcurrency(job)
+  const lane = getWorkerLaneLabel(job)
+
+  for (let index = 0; index < nextPages.length; index += 1) {
+    const page = nextPages[index]
+
+    if (!page || page.status !== "Extracting") {
+      continue
+    }
+
+    const imageUrl = page.imagePath ?? `/tmp/${job.id}-${index + 1}.png`
+    const result = await runner({
+      imageUrl,
+      prompt: `Extract the page content for ${page.page}`,
+    })
+    outputs.push(`### ${page.page}\n\n${result.text}`)
+
+    nextPages[index] = {
+      ...page,
+      imagePath: imageUrl,
+      llm: "Done",
+      status: "Compared",
+      note: `LLM: ${result.text}`,
+    }
+  }
+
+  let activeSlots = 0
+  nextPages.forEach((page, index) => {
+    if (page.status !== "Waiting" || activeSlots >= concurrency) {
+      return
+    }
+
+    activeSlots += 1
+    nextPages[index] = {
+      ...page,
+      llm: "Running",
+      status: "Extracting",
+      note: `${page.page} sedang menunggu hasil extraction dari vision LLM (slot ${activeSlots}/${concurrency})`,
+    }
+  })
+
+  const comparedPages = nextPages.filter(
+    (page) => page.status === "Compared"
+  ).length
+  const nextJob: JobRecord = {
+    ...job,
+    status: comparedPages >= job.pages ? "Completed" : "Processing",
+    progress: Math.min(Math.max(job.progress, 35) + comparedPages * 10, 100),
+    rendered: Math.max(job.rendered, job.pages),
+    extracted: comparedPages,
+  }
+
+  return {
+    job: nextJob,
+    detail: {
+      ...detail,
+      background: buildBackgroundState(nextJob, detail.background.preparedAt),
+      subtitle: "Vision LLM runtime is extracting rendered pages",
+      compareSummary: `${comparedPages} halaman sudah punya hasil extraction dari vision LLM`,
+      pages: nextPages,
+      events: [
+        ...nextPages
+          .filter((page) => page.status === "Compared")
+          .map((page) => `[${lane}] LLM completed for ${page.page}`),
+        `Worker tick consumed ${nextJob.name} via ${lane} with vision LLM execution`,
+        ...detail.events,
+      ].slice(0, 12),
+      outputPreview: buildLlmOutputPreview(nextJob, outputs),
+      compareRows: detail.compareRows.map((row, index) => ({
+        ...row,
+        llmSummary:
+          outputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
+          row.llmSummary,
+      })),
+      pipeline: detail.pipeline.map((step, index) => {
+        if (index === 2) {
+          return {
+            ...step,
+            title:
+              nextJob.status === "Completed"
+                ? "Vision LLM completed"
+                : "Vision LLM running",
+            detail:
+              nextJob.status === "Completed"
+                ? "Semua halaman selesai diekstrak oleh vision LLM"
+                : "Vision LLM sedang memproses batch halaman aktif",
+            state: nextJob.status === "Completed" ? "done" : "active",
+          }
+        }
+
+        if (index === 3) {
+          return {
+            ...step,
+            title:
+              nextJob.status === "Completed"
+                ? "LLM output ready"
+                : "LLM output warming up",
+            detail:
+              nextJob.status === "Completed"
+                ? "Preview output terisi dari hasil LLM"
+                : "Preview output mulai terisi dari halaman yang sudah selesai di vision LLM",
             state: nextJob.status === "Completed" ? "done" : "active",
           }
         }
@@ -1833,6 +1962,13 @@ export async function runPreparedJobsOnce(
           detail,
           options.tesseractRunner ?? runTesseractPage
         )
+      )
+      continue
+    }
+
+    if (job.mode === "LLM only") {
+      processedJobs.push(
+        await applyLlmWorkerRun(job, detail, options.llmRunner ?? runLlmPage)
       )
       continue
     }

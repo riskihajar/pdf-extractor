@@ -1,7 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { buildLlmPagePayload, getLlmRuntimeStatus } from "@/lib/llm-runtime"
+import {
+  buildLlmPagePayload,
+  getLlmRuntimeStatus,
+  runLlmPage,
+} from "@/lib/llm-runtime"
 
 test("getLlmRuntimeStatus reports missing config by default", () => {
   const previousBaseUrl = process.env.LLM_BASE_URL
@@ -71,4 +75,61 @@ test("buildLlmPagePayload uses configured image input mode", () => {
   process.env.LLM_MODEL = previousModel
   process.env.LLM_REASONING_EFFORT = previousReasoningEffort
   process.env.LLM_IMAGE_INPUT_MODE = previousImageInputMode
+})
+
+test("runLlmPage posts payload and returns output text", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+
+  const result = await runLlmPage(
+    {
+      imageUrl: "https://example.com/page-1.png",
+      prompt: "Extract this page",
+    },
+    async (_url, init) =>
+      new Response(
+        JSON.stringify({
+          output_text: `ok:${String(init?.body).includes("page-1.png")}`,
+        }),
+        { status: 200 }
+      )
+  )
+
+  assert.equal(result.text, "ok:true")
+  assert.equal(result.payload.model, "gpt-vision")
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
+})
+
+test("runLlmPage throws on non-200 response", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+
+  await assert.rejects(
+    () =>
+      runLlmPage(
+        {
+          imageUrl: "https://example.com/page-1.png",
+          prompt: "Extract this page",
+        },
+        async () => new Response("boom", { status: 500 })
+      ),
+    /LLM runtime request failed/
+  )
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
 })
