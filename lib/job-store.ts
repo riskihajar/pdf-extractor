@@ -196,6 +196,8 @@ type JobCompareRow = {
   llm_summary: string
   tesseract_summary: string
   winner_reason?: string | null
+  llm_score?: number | null
+  tesseract_score?: number | null
 }
 
 type JobPipelineRow = {
@@ -221,7 +223,7 @@ const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
   join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
-const JOB_STORE_SCHEMA_VERSION = 7
+const JOB_STORE_SCHEMA_VERSION = 8
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -484,15 +486,20 @@ function buildCompareOutputPreview(
 }
 
 function chooseCompareWinner(llmText: string, tesseractText: string) {
+  const { llm, tesseract } = scoreCompareOutputs(llmText, tesseractText)
+  return llm >= tesseract ? "LLM" : "Tesseract"
+}
+
+function scoreCompareOutputs(llmText: string, tesseractText: string) {
   const normalizedLlm = llmText.trim()
   const normalizedTesseract = tesseractText.trim()
 
   if (!normalizedLlm && normalizedTesseract) {
-    return "Tesseract"
+    return { llm: 0, tesseract: 100 }
   }
 
   if (!normalizedTesseract && normalizedLlm) {
-    return "LLM"
+    return { llm: 100, tesseract: 0 }
   }
 
   const llmWordCount = normalizedLlm.split(/\s+/).filter(Boolean).length
@@ -509,11 +516,11 @@ function chooseCompareWinner(llmText: string, tesseractText: string) {
     ? 8
     : 0
 
-  const llmScore = normalizedLlm.length + llmWordCount * 2 - llmPenalty
-  const tesseractScore =
-    normalizedTesseract.length + tesseractWordCount * 2 - tesseractPenalty
-
-  return llmScore >= tesseractScore ? "LLM" : "Tesseract"
+  return {
+    llm: normalizedLlm.length + llmWordCount * 2 - llmPenalty,
+    tesseract:
+      normalizedTesseract.length + tesseractWordCount * 2 - tesseractPenalty,
+  }
 }
 
 function explainCompareWinner(llmText: string, tesseractText: string) {
@@ -992,6 +999,11 @@ async function applyCompareWorkerRun(
           tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
             row.tesseractSummary
         ),
+        scores: scoreCompareOutputs(
+          llmOutputs[index]?.replace(/^### .*\n\n/, "") || row.llmSummary,
+          tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
+            row.tesseractSummary
+        ),
         llmSummary:
           llmOutputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
           row.llmSummary,
@@ -1097,8 +1109,8 @@ function writeNormalizedDetail(
   normalized.compareRows.forEach((row, index) => {
     db.prepare(
       `INSERT INTO job_compare_rows (
-        job_id, position, page_label, winner, llm_summary, tesseract_summary, winner_reason
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        job_id, position, page_label, winner, llm_summary, tesseract_summary, winner_reason, llm_score, tesseract_score
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       job.id,
       index,
@@ -1106,7 +1118,9 @@ function writeNormalizedDetail(
       row.winner,
       row.llmSummary,
       row.tesseractSummary,
-      row.reason ?? null
+      row.reason ?? null,
+      row.scores?.llm ?? null,
+      row.scores?.tesseract ?? null
     )
   })
 
@@ -1400,6 +1414,26 @@ function applySchemaMigrations(db: DatabaseSync) {
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(7, new Date().toISOString())
   }
+
+  if (currentVersion < 8) {
+    const compareColumns = db
+      .prepare(`PRAGMA table_info(job_compare_rows)`)
+      .all() as Array<{
+      name: string
+    }>
+
+    if (!compareColumns.some((column) => column.name === "llm_score")) {
+      db.exec(`ALTER TABLE job_compare_rows ADD COLUMN llm_score REAL`)
+    }
+
+    if (!compareColumns.some((column) => column.name === "tesseract_score")) {
+      db.exec(`ALTER TABLE job_compare_rows ADD COLUMN tesseract_score REAL`)
+    }
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(8, new Date().toISOString())
+  }
 }
 
 function initializeDatabase(db: DatabaseSync) {
@@ -1472,6 +1506,8 @@ function initializeDatabase(db: DatabaseSync) {
       llm_summary TEXT NOT NULL,
       tesseract_summary TEXT NOT NULL,
       winner_reason TEXT,
+      llm_score REAL,
+      tesseract_score REAL,
       PRIMARY KEY (job_id, position)
     );
 
@@ -1570,7 +1606,7 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
   const compareRows = db
     .prepare(
       `SELECT job_id, position, page_label, winner, llm_summary, tesseract_summary
-              , winner_reason
+              , winner_reason, llm_score, tesseract_score
        FROM job_compare_rows
        ORDER BY job_id ASC, position ASC`
     )
@@ -1666,6 +1702,16 @@ function buildDetailsFromNormalizedTables(db: DatabaseSync) {
       llmSummary: row.llm_summary,
       tesseractSummary: row.tesseract_summary,
       reason: row.winner_reason ?? undefined,
+      scores:
+        row.llm_score !== undefined &&
+        row.llm_score !== null &&
+        row.tesseract_score !== undefined &&
+        row.tesseract_score !== null
+          ? {
+              llm: row.llm_score,
+              tesseract: row.tesseract_score,
+            }
+          : undefined,
     })
   })
 

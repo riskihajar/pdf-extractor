@@ -1173,6 +1173,12 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                             <p className="mt-2 text-xs leading-6 text-stone-300">
                               {row.reason}
                             </p>
+                            {row.scores ? (
+                              <p className="mt-2 text-[11px] tracking-[0.18em] text-stone-400 uppercase">
+                                Scores · LLM {row.scores.llm} / Tesseract{" "}
+                                {row.scores.tesseract}
+                              </p>
+                            ) : null}
                           </div>
                         ) : null}
                       </article>

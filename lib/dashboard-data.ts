@@ -60,6 +60,10 @@ export type JobDetail = {
     llmSummary: string
     tesseractSummary: string
     reason?: string
+    scores?: {
+      llm: number
+      tesseract: number
+    }
   }>
   pipeline: Array<{
     title: string

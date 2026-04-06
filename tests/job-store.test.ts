@@ -150,5 +150,5 @@ test("retryPage returns null for unknown page", () => {
 })
 
 test("job store exposes current schema version", () => {
-  assert.equal(getJobStoreSchemaVersion(), 7)
+  assert.equal(getJobStoreSchemaVersion(), 8)
 })
