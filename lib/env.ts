@@ -6,6 +6,12 @@ export type LlmRuntimeConfig = {
   examplePdfPath?: string
 }
 
+export type TesseractRuntimeConfig = {
+  binaryPath: string
+  language: string
+  dataPath: string
+}
+
 export function getLlmRuntimeConfig(): LlmRuntimeConfig {
   return {
     baseUrl: process.env.LLM_BASE_URL ?? "",
@@ -18,4 +24,12 @@ export function getLlmRuntimeConfig(): LlmRuntimeConfig {
 
 export function hasLlmRuntimeConfig(config = getLlmRuntimeConfig()) {
   return Boolean(config.baseUrl && config.model && config.hasApiKey)
+}
+
+export function getTesseractRuntimeConfig(): TesseractRuntimeConfig {
+  return {
+    binaryPath: process.env.TESSERACT_PATH ?? "/opt/homebrew/bin/tesseract",
+    language: process.env.TESSERACT_LANG ?? "eng",
+    dataPath: process.env.TESSDATA_PREFIX ?? "",
+  }
 }
