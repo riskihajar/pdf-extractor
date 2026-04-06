@@ -121,6 +121,14 @@ type WorkerRunMutation = {
   }>
 }
 
+type WorkerDrainResult = {
+  ticks: number
+  processedJobs: Array<{
+    job: JobRecord
+    detail: JobDetail
+  }>
+}
+
 type WorkerRunOptions = {
   llmRunner?: LlmRunner
   tesseractRunner?: TesseractRunner
@@ -2300,6 +2308,45 @@ export async function runPreparedJobsOnce(
       job: { ...mutation.job },
       detail: structuredClone(mutation.detail),
     })),
+  }
+}
+
+export async function runPreparedJobsUntilIdle(
+  options: WorkerRunOptions & { maxTicks?: number } = {}
+): Promise<WorkerDrainResult> {
+  const maxTicks = options.maxTicks ?? 50
+  const processedJobs = new Map<string, { job: JobRecord; detail: JobDetail }>()
+
+  for (let tick = 1; tick <= maxTicks; tick += 1) {
+    const result = await runPreparedJobsOnce(options)
+
+    if (result.processedJobs.length === 0) {
+      return {
+        ticks: tick - 1,
+        processedJobs: Array.from(processedJobs.values()),
+      }
+    }
+
+    result.processedJobs.forEach((entry) => {
+      processedJobs.set(entry.job.id, entry)
+    })
+
+    const state = readStateFromDatabase(getDatabase())
+    const stillActive = state.jobs.some(
+      (job) => job.status === "Queued" || job.status === "Processing"
+    )
+
+    if (!stillActive) {
+      return {
+        ticks: tick,
+        processedJobs: Array.from(processedJobs.values()),
+      }
+    }
+  }
+
+  return {
+    ticks: maxTicks,
+    processedJobs: Array.from(processedJobs.values()),
   }
 }
 

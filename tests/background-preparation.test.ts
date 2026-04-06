@@ -442,3 +442,27 @@ test("tesseract lane uses wider mock concurrency than compare lane", async () =>
   process.env.LLM_MODEL = previousModel
   process.env.LLM_API_KEY = previousApiKey
 })
+
+test("worker drain route keeps ticking until queue goes idle", async () => {
+  const { drainWorkers } = await import("@/lib/job-actions")
+  const payload = await drainWorkers({
+    llmRunner: async ({ imageUrl }) => ({
+      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      payload: {
+        model: "gpt-vision",
+        reasoningEffort: "medium",
+        inputMode: "url",
+        messages: [],
+      },
+    }),
+    tesseractRunner: async (imagePath) => ({
+      text: `OCR text for ${imagePath.split("/").pop()}`,
+      command: "fake-tesseract",
+      args: [imagePath],
+    }),
+    maxTicks: 8,
+  })
+
+  assert.ok(payload.ticks >= 1)
+  assert.ok(Array.isArray(payload.processedJobs))
+})

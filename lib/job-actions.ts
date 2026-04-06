@@ -16,6 +16,7 @@ import {
   getJobsState,
   getWorkerDiagnosticsState,
   runPreparedJobsOnce,
+  runPreparedJobsUntilIdle,
   reserveNextJobId,
   retryPageById,
   retryJobById,
@@ -197,6 +198,14 @@ export async function runWorkers(options?: {
   tesseractRunner?: TesseractRunner
 }) {
   return runPreparedJobsOnce(options)
+}
+
+export async function drainWorkers(options?: {
+  llmRunner?: LlmRunner
+  tesseractRunner?: TesseractRunner
+  maxTicks?: number
+}) {
+  return runPreparedJobsUntilIdle(options)
 }
 
 export function getJob(jobId: string): GetJobResponse | null {
