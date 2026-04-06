@@ -30,11 +30,15 @@ Yang sudah ada saat ini:
 - tabs detail `Pages`, `Compare`, `Output`, `Logs`,
 - route internal untuk `upload`, `start`, `start-all`,
 - route internal observability untuk `GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/workers`, dan trigger mock worker `POST /api/workers/run`,
+- route internal observability untuk `GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/workers`, `POST /api/workers/run`, dan `POST /api/workers/drain`,
 - metadata upload + render artifacts tersimpan di SQLite dev store,
 - render pipeline nyata berbasis `pdftoppm` untuk menghasilkan PNG per halaman,
 - metadata handoff worker/background sekarang ikut disimpan agar job siap dipindah ke queue runtime berikutnya,
 - worker diagnostics dan mock worker tick untuk simulasi konsumsi queue background,
 - preview image halaman nyata via endpoint internal dan panel `Pages`,
+- lane `Tesseract only` sekarang sudah menjalankan OCR nyata via binary Tesseract lokal,
+- lane `LLM only` sekarang sudah menjalankan extraction nyata via OpenAI-like `chat/completions` dengan image base64 dari artifact render,
+- compare audit trail sekarang menyimpan winner, reason, dan score per halaman,
 - route internal aman untuk status runtime LLM,
 - helper server-side untuk membaca env lokal tanpa mengekspos secret ke UI,
 - dokumentasi produk dan tracking progres.
@@ -43,12 +47,11 @@ Yang masih belum selesai:
 
 - worker/background queue terpisah penuh di luar proses app,
 - queue runtime nyata dengan concurrency per lane,
-- integrasi Tesseract,
-- integrasi OpenAI-like vision API untuk extraction nyata,
+- compare lane real end-to-end untuk semua jalur uploaded job,
 - export pipeline final,
-- detail compare berbasis hasil nyata,
+- download output final,
 - cancel/pause job,
-- download output final.
+- connection test/healthcheck runtime LLM yang lebih eksplisit.
 
 ## Product Workflow
 
@@ -102,8 +105,13 @@ Variabel yang saat ini digunakan:
 
 - `LLM_API_KEY`
 - `LLM_BASE_URL`
+- `LLM_API_STYLE`
 - `LLM_MODEL`
 - `LLM_REASONING_EFFORT`
+- `LLM_IMAGE_INPUT_MODE`
+- `LLM_STREAM`
+- `TESSERACT_PATH`
+- `TESSERACT_LANG`
 - `EXAMPLE_PDF_PATH_TO_EXTRACT`
 
 Catatan:
@@ -117,6 +125,7 @@ Catatan:
 Route internal yang sudah tersedia:
 
 - `GET /api/config/llm`
+- `GET /api/config/tesseract`
 - `GET /api/jobs`
 - `GET /api/jobs/:id`
 - `GET /api/jobs/:id/pages`
@@ -129,6 +138,7 @@ Route internal yang sudah tersedia:
 - `POST /api/pages/:id/retry`
 - `GET /api/workers`
 - `POST /api/workers/run`
+- `POST /api/workers/drain`
 
 `POST /api/jobs/upload` sekarang menerima `multipart/form-data` untuk PDF nyata dari dashboard. File PDF disimpan ke `.data/storage/uploads`, halaman dirender ke `.data/storage/renders/<job-id>`, lalu metadata path/page count/artifact disimpan ke SQLite agar job bisa dilanjutkan oleh flow `Start` yang sudah ada.
 
@@ -146,7 +156,9 @@ Vertical slice yang sekarang benar-benar jalan di local dev:
 - job hasil upload bisa masuk ke flow `Start`/`Start All` yang sama,
 - detail `Pages` menampilkan path artifact render nyata per halaman,
 - preview page image nyata sudah bisa dibuka dari endpoint internal page preview,
-- mock worker tick bisa mengonsumsi job prepared untuk mensimulasikan progress extraction.
+- mock worker tick bisa mengonsumsi job prepared untuk mensimulasikan progress extraction,
+- `Tesseract only` sudah tervalidasi end-to-end pada sample PDF nyata,
+- `LLM only` juga sudah tervalidasi end-to-end memakai payload `chat/completions` OpenAI-like dengan image data URL.
 
 Catatan operasional:
 
@@ -236,7 +248,7 @@ npm run format
 
 ### Phase 4
 
-- implement compare flow berbasis hasil nyata,
+- implement compare flow berbasis hasil nyata secara penuh,
 - retry granular end-to-end,
 - output aggregation,
 - logs dan observability produksi.

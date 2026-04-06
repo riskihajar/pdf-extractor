@@ -85,6 +85,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan route `GET /api/config/llm`
 - [x] Tampilkan status runtime LLM di dashboard
 - [x] Tampilkan status API key dan example PDF path secara aman
+- [x] Tambahkan status/runtime config Tesseract
 - [ ] Tambahkan connection test ke endpoint LLM nyata
 
 ## 8. Internal API Draft
@@ -126,19 +127,19 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 
 ## 11. OCR and Vision Extraction
 
-- [ ] Integrasi Tesseract nyata
-- [ ] Integrasi OpenAI-like vision API nyata
-- [ ] Jalankan extraction per halaman
-- [ ] Simpan hasil per engine
-- [ ] Bandingkan hasil per engine berbasis output nyata
+- [x] Integrasi Tesseract nyata
+- [x] Integrasi OpenAI-like vision API nyata untuk jalur `chat/completions`
+- [x] Jalankan extraction per halaman
+- [x] Simpan hasil per engine
+- [~] Bandingkan hasil per engine berbasis output nyata
 - [ ] Tambahkan fallback mode Tesseract -> LLM
 
 ## 12. Output and Export
 
 - [x] Preview UI untuk `.md`
 - [x] Preview UI untuk `.txt`
-- [ ] Generate markdown nyata dari hasil extraction
-- [ ] Generate text nyata dari hasil extraction
+- [~] Generate markdown nyata dari hasil extraction
+- [~] Generate text nyata dari hasil extraction
 - [ ] Download output final
 - [ ] Partial export jika ada halaman gagal
 
@@ -151,7 +152,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tab `Logs` dan `Output` melakukan fetch ke endpoint backend saat dibuka
 - [~] Log dari mock worker/background runtime
 - [ ] Log dari render worker nyata
-- [ ] Log dari OCR / LLM runtime nyata
+- [~] Log dari OCR / LLM runtime nyata
 - [ ] Error taxonomy final dan retry reason
 
 ## 14. Quality Gates
@@ -180,9 +181,12 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 
 ## 16. Next Todo Plan
 
-- [ ] Tambahkan concurrency mock per queue lane (`extract-llm`, `extract-ocr`, `extract-compare`)
-- [ ] Tambahkan log worker per lane dan per page yang lebih granular
-- [ ] Integrasikan Tesseract nyata untuk extraction per halaman
-- [ ] Simpan hasil extraction per engine ke store granular
-- [ ] Sambungkan tab `Compare` dan `Output` ke hasil extraction nyata
-- [ ] Tambahkan export/download final `.md` dan `.txt`
+- [x] Tambahkan concurrency mock per queue lane (`extract-llm`, `extract-ocr`, `extract-compare`)
+- [x] Tambahkan log worker per lane dan per page yang lebih granular
+- [x] Integrasikan Tesseract nyata untuk extraction per halaman
+- [x] Simpan hasil extraction per engine ke store granular
+- [x] Sambungkan tab `Compare` dan `Output` ke hasil extraction nyata
+- [ ] Selesaikan compare lane real end-to-end untuk uploaded job dengan artifact nyata
+- [ ] Rapikan export/download final `.md` dan `.txt` berbasis winner/current engine output
+- [ ] Tambahkan connection test runtime LLM/Tesseract dari dashboard atau route internal
+- [ ] Tambahkan log runtime per page yang lebih eksplisit untuk jalur real compare

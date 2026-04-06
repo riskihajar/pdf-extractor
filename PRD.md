@@ -96,14 +96,16 @@ Yang sudah terwujud dalam prototype saat ini:
 - render PDF nyata ke PNG per halaman,
 - preview image halaman lewat route internal,
 - metadata background preparation per job,
-- worker diagnostics dan mock worker tick untuk simulasi runtime queue.
+- worker diagnostics dan mock worker tick untuk simulasi runtime queue,
+- lane Tesseract nyata untuk uploaded job dengan artifact render valid,
+- lane LLM nyata untuk uploaded job lewat `chat/completions` OpenAI-like dengan image data URL,
+- compare audit trail dengan winner, reason, dan score per halaman.
 
 Yang masih mock atau draft:
 
 - queue worker nyata di luar proses app,
 - concurrency worker per lane yang realistis,
-- OCR nyata,
-- vision extraction nyata,
+- compare lane real end-to-end untuk semua jalur uploaded job,
 - output aggregation nyata.
 
 ## 10. Core Workflow
