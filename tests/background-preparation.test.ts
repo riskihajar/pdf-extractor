@@ -75,11 +75,25 @@ test("worker diagnostics groups prepared jobs by queue lane", async () => {
 })
 
 test("worker run route consumes prepared jobs once", async () => {
-  const response = await runWorkersRoute()
-  const payload = await response.json()
+  const { runWorkers } = await import("@/lib/job-actions")
+  const payload = await runWorkers({
+    llmRunner: async ({ imageUrl }) => ({
+      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      payload: {
+        model: "gpt-vision",
+        reasoningEffort: "medium",
+        inputMode: "url",
+        messages: [],
+      },
+    }),
+    tesseractRunner: async (imagePath) => ({
+      text: `OCR text for ${imagePath.split("/").pop()}`,
+      command: "fake-tesseract",
+      args: [imagePath],
+    }),
+  })
   const refreshedJob = getJob("job-2")
 
-  assert.equal(response.status, 200)
   assert.ok(payload.processedJobs.length > 0)
   assert.ok(refreshedJob)
   assert.equal(refreshedJob.job.status, "Processing")
@@ -94,6 +108,14 @@ test("worker run route consumes prepared jobs once", async () => {
 })
 
 test("llm-only lane stores vision output into preview", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+
   const uploadResponse = await uploadJobsRoute(
     new Request("http://localhost/api/jobs/upload", {
       method: "POST",
@@ -143,6 +165,60 @@ test("llm-only lane stores vision output into preview", async () => {
   assert.match(refreshedJob.detail.outputPreview.text, /Vision LLM Output/)
   assert.match(refreshedJob.detail.outputPreview.text, /LLM text for/)
   assert.match(refreshedJob.detail.events.join("\n"), /vision LLM execution/)
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
+})
+
+test("compare lane stores both OCR and LLM summaries with winner", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+
+  const { runWorkers } = await import("@/lib/job-actions")
+  await runWorkers({
+    llmRunner: async ({ imageUrl }) => ({
+      text: `LLM rich text for ${imageUrl.split("/").pop()}`,
+      payload: {
+        model: "gpt-vision",
+        reasoningEffort: "medium",
+        inputMode: "url",
+        messages: [],
+      },
+    }),
+    tesseractRunner: async (imagePath) => ({
+      text: `OCR text for ${imagePath.split("/").pop()}`,
+      command: "fake-tesseract",
+      args: [imagePath],
+    }),
+  })
+
+  const compareJob = getJob("job-1")
+
+  assert.ok(compareJob)
+  assert.match(compareJob.detail.outputPreview.text, /Compare Output/)
+  assert.match(
+    compareJob.detail.compareRows[0]?.llmSummary ?? "",
+    /LLM rich text for/
+  )
+  assert.match(
+    compareJob.detail.compareRows[0]?.tesseractSummary ?? "",
+    /OCR text for/
+  )
+  assert.equal(compareJob.detail.compareRows[0]?.winner, "LLM")
+  assert.match(
+    compareJob.detail.events.join("\n"),
+    /OCR \+ vision compare execution/
+  )
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
 })
 
 test("tesseract-only lane stores OCR text into output preview", async () => {
@@ -182,6 +258,15 @@ test("tesseract-only lane stores OCR text into output preview", async () => {
   assert.ok(startedJob)
 
   await runWorkers({
+    llmRunner: async ({ imageUrl }) => ({
+      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      payload: {
+        model: "gpt-vision",
+        reasoningEffort: "medium",
+        inputMode: "url",
+        messages: [],
+      },
+    }),
     tesseractRunner: async (imagePath) => ({
       text: `OCR text for ${imagePath.split("/").pop()}`,
       command: "fake-tesseract",

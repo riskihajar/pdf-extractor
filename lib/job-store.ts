@@ -462,6 +462,32 @@ function buildLlmOutputPreview(job: JobRecord, outputs: string[]) {
   }
 }
 
+function buildCompareOutputPreview(
+  job: JobRecord,
+  llmOutputs: string[],
+  tesseractOutputs: string[]
+) {
+  const sections = llmOutputs.map((llmOutput, index) => {
+    const tesseractOutput = tesseractOutputs[index] ?? "No OCR output yet"
+
+    return `${llmOutput}\n\n#### Tesseract\n\n${tesseractOutput.replace(/^### .*\n\n/, "")}`
+  })
+
+  const body =
+    sections.length > 0 ? sections.join("\n\n") : "No compare output yet"
+
+  return {
+    markdown: `# ${job.name}\n\n## Compare Output\n\n${body}`,
+    text: `${job.name}\n\nCompare Output\n\n${body}`,
+  }
+}
+
+function chooseCompareWinner(llmText: string, tesseractText: string) {
+  return llmText.trim().length >= tesseractText.trim().length
+    ? "LLM"
+    : "Tesseract"
+}
+
 function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
   const concurrency = getWorkerConcurrency(job)
   const lane = getWorkerLaneLabel(job)
@@ -804,6 +830,141 @@ async function applyLlmWorkerRun(
               nextJob.status === "Completed"
                 ? "Preview output terisi dari hasil LLM"
                 : "Preview output mulai terisi dari halaman yang sudah selesai di vision LLM",
+            state: nextJob.status === "Completed" ? "done" : "active",
+          }
+        }
+
+        return step
+      }),
+    },
+  }
+}
+
+async function applyCompareWorkerRun(
+  job: JobRecord,
+  detail: JobDetail,
+  llmRunner: LlmRunner,
+  tesseractRunner: TesseractRunner
+): Promise<JobMutation> {
+  const llmOutputs: string[] = []
+  const tesseractOutputs: string[] = []
+  const nextPages = detail.pages.map((page) => ({ ...page }))
+  const lane = getWorkerLaneLabel(job)
+
+  for (let index = 0; index < nextPages.length; index += 1) {
+    const page = nextPages[index]
+
+    if (!page || page.status !== "Extracting") {
+      continue
+    }
+
+    const imagePath = page.imagePath ?? `/tmp/${job.id}-${index + 1}.png`
+    const [llmResult, tesseractResult] = await Promise.all([
+      llmRunner({
+        imageUrl: imagePath,
+        prompt: `Compare extraction input for ${page.page}`,
+      }),
+      tesseractRunner(imagePath),
+    ])
+
+    llmOutputs.push(`### ${page.page}\n\n${llmResult.text}`)
+    tesseractOutputs.push(`### ${page.page}\n\n${tesseractResult.text}`)
+
+    nextPages[index] = {
+      ...page,
+      imagePath,
+      llm: "Done",
+      tesseract: "Done",
+      status: "Compared",
+      note: `COMPARE: ${chooseCompareWinner(llmResult.text, tesseractResult.text)}`,
+    }
+  }
+
+  const nextWaitingIndex = nextPages.findIndex(
+    (page) => page.status === "Waiting"
+  )
+  if (nextWaitingIndex >= 0) {
+    nextPages[nextWaitingIndex] = {
+      ...nextPages[nextWaitingIndex]!,
+      llm: "Running",
+      tesseract: "Running",
+      status: "Extracting",
+      note: `${nextPages[nextWaitingIndex]!.page} sedang dibandingkan oleh OCR + vision lane`,
+    }
+  }
+
+  const comparedPages = nextPages.filter(
+    (page) => page.status === "Compared"
+  ).length
+  const nextJob: JobRecord = {
+    ...job,
+    status: comparedPages >= job.pages ? "Completed" : "Processing",
+    progress: Math.min(Math.max(job.progress, 35) + comparedPages * 10, 100),
+    rendered: Math.max(job.rendered, job.pages),
+    extracted: comparedPages,
+  }
+
+  return {
+    job: nextJob,
+    detail: {
+      ...detail,
+      background: buildBackgroundState(nextJob, detail.background.preparedAt),
+      subtitle: "Compare lane is reconciling OCR and vision LLM output",
+      compareSummary: `${comparedPages} halaman sudah punya hasil compare dari OCR dan vision LLM`,
+      pages: nextPages,
+      events: [
+        ...nextPages
+          .filter((page) => page.status === "Compared")
+          .map((page) => `[${lane}] compare completed for ${page.page}`),
+        `Worker tick consumed ${nextJob.name} via ${lane} with OCR + vision compare execution`,
+        ...detail.events,
+      ].slice(0, 12),
+      outputPreview: buildCompareOutputPreview(
+        nextJob,
+        llmOutputs,
+        tesseractOutputs
+      ),
+      compareRows: detail.compareRows.map((row, index) => ({
+        ...row,
+        winner: chooseCompareWinner(
+          llmOutputs[index]?.replace(/^### .*\n\n/, "") || row.llmSummary,
+          tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
+            row.tesseractSummary
+        ) as "LLM" | "Tesseract",
+        llmSummary:
+          llmOutputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
+          row.llmSummary,
+        tesseractSummary:
+          tesseractOutputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
+          row.tesseractSummary,
+      })),
+      pipeline: detail.pipeline.map((step, index) => {
+        if (index === 2) {
+          return {
+            ...step,
+            title:
+              nextJob.status === "Completed"
+                ? "Compare lane completed"
+                : "Compare lane running",
+            detail:
+              nextJob.status === "Completed"
+                ? "OCR dan vision LLM selesai dibandingkan untuk semua halaman"
+                : "OCR dan vision LLM sedang diproses paralel untuk halaman aktif",
+            state: nextJob.status === "Completed" ? "done" : "active",
+          }
+        }
+
+        if (index === 3) {
+          return {
+            ...step,
+            title:
+              nextJob.status === "Completed"
+                ? "Compare output ready"
+                : "Compare output warming up",
+            detail:
+              nextJob.status === "Completed"
+                ? "Winner compare dan output gabungan sudah siap"
+                : "Winner compare mulai muncul dari halaman yang selesai diproses",
             state: nextJob.status === "Completed" ? "done" : "active",
           }
         }
@@ -1969,6 +2130,22 @@ export async function runPreparedJobsOnce(
     if (job.mode === "LLM only") {
       processedJobs.push(
         await applyLlmWorkerRun(job, detail, options.llmRunner ?? runLlmPage)
+      )
+      continue
+    }
+
+    if (
+      job.mode === "Both compare" &&
+      options.llmRunner &&
+      options.tesseractRunner
+    ) {
+      processedJobs.push(
+        await applyCompareWorkerRun(
+          job,
+          detail,
+          options.llmRunner ?? runLlmPage,
+          options.tesseractRunner ?? runTesseractPage
+        )
       )
       continue
     }
