@@ -131,7 +131,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Integrasi OpenAI-like vision API nyata untuk jalur `chat/completions`
 - [x] Jalankan extraction per halaman
 - [x] Simpan hasil per engine
-- [~] Bandingkan hasil per engine berbasis output nyata
+- [x] Bandingkan hasil per engine berbasis output nyata
 - [ ] Tambahkan fallback mode Tesseract -> LLM
 
 ## 12. Output and Export
@@ -186,7 +186,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Integrasikan Tesseract nyata untuk extraction per halaman
 - [x] Simpan hasil extraction per engine ke store granular
 - [x] Sambungkan tab `Compare` dan `Output` ke hasil extraction nyata
-- [ ] Selesaikan compare lane real end-to-end untuk uploaded job dengan artifact nyata
+- [x] Selesaikan compare lane real end-to-end untuk uploaded job dengan artifact nyata
 - [ ] Rapikan export/download final `.md` dan `.txt` berbasis winner/current engine output
 - [ ] Tambahkan connection test runtime LLM/Tesseract dari dashboard atau route internal
 - [ ] Tambahkan log runtime per page yang lebih eksplisit untuk jalur real compare

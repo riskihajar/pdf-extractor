@@ -4,10 +4,11 @@ import test from "node:test"
 import { createJobDetail, initialJobDetails } from "@/lib/dashboard-data"
 import { POST as startJobRoute } from "@/app/api/jobs/start/route"
 import { POST as uploadJobsRoute } from "@/app/api/jobs/upload/route"
-import { getJob, getJobs } from "@/lib/job-actions"
+import { getJob, getJobOutput, getJobs } from "@/lib/job-actions"
 import { GET as getWorkersRoute } from "@/app/api/workers/route"
 import { POST as runWorkersRoute } from "@/app/api/workers/run/route"
 import { resetJobStoreForTests } from "@/lib/job-store"
+import { buildPdfBuffer } from "./helpers/pdf"
 
 test.beforeEach(() => {
   resetJobStoreForTests()
@@ -187,14 +188,150 @@ test("llm-only lane stores vision output into preview", async () => {
 
 test("compare lane stores both OCR and LLM summaries with winner", async () => {
   const { runPreparedJobsOnce } = await import("@/lib/job-store")
-  const originalImagePath = initialJobDetails["job-1"]?.pages[0]?.imagePath
+  const originalImagePath = initialJobDetails["job-1"]?.pages[1]?.imagePath
 
-  if (initialJobDetails["job-1"]?.pages[0]) {
-    initialJobDetails["job-1"].pages[0]!.imagePath =
+  if (initialJobDetails["job-1"]?.pages[1]) {
+    initialJobDetails["job-1"].pages[1]!.imagePath =
       "/tmp/mock-compare-page-1.png"
   }
 
-  await runPreparedJobsOnce({
+  try {
+    await runPreparedJobsOnce({
+      llmRunner: async ({ imageUrl }) => ({
+        text: `LLM rich text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
+        payload: {
+          model: "gpt-vision",
+          reasoningEffort: "medium",
+          inputMode: "url",
+          messages: [],
+        },
+      }),
+      tesseractRunner: async (imagePath) => ({
+        text: `OCR text for ${imagePath.split("/").pop()}`,
+        command: "fake-tesseract",
+        args: [imagePath],
+      }),
+    })
+
+    const compareJob = getJob("job-1")
+
+    assert.ok(compareJob)
+    assert.match(compareJob.detail.outputPreview.text, /Compare Output/)
+    assert.match(
+      compareJob.detail.compareRows[1]?.llmSummary ?? "",
+      /LLM rich text for/
+    )
+    assert.match(
+      compareJob.detail.compareRows[1]?.tesseractSummary ?? "",
+      /OCR text for/
+    )
+    assert.equal(compareJob.detail.compareRows[1]?.winner, "LLM")
+    assert.match(
+      compareJob.detail.compareRows[1]?.reason ?? "",
+      /skor gabungan panjang/
+    )
+    assert.ok(compareJob.detail.compareRows[1]?.scores)
+    assert.equal(
+      (compareJob.detail.compareRows[1]?.scores?.llm ?? 0) >=
+        (compareJob.detail.compareRows[1]?.scores?.tesseract ?? 0),
+      true
+    )
+    assert.match(
+      compareJob.detail.events.join("\n"),
+      /OCR \+ vision compare execution/
+    )
+  } finally {
+    if (initialJobDetails["job-1"]?.pages[1]) {
+      initialJobDetails["job-1"].pages[1]!.imagePath = originalImagePath
+    }
+  }
+})
+
+test("compare lane chooses Tesseract when LLM output looks low confidence", async () => {
+  const { runPreparedJobsOnce } = await import("@/lib/job-store")
+  const originalImagePath = initialJobDetails["job-1"]?.pages[1]?.imagePath
+
+  if (initialJobDetails["job-1"]?.pages[1]) {
+    initialJobDetails["job-1"].pages[1]!.imagePath =
+      "/tmp/mock-compare-page-1.png"
+  }
+
+  try {
+    await runPreparedJobsOnce({
+      llmRunner: async () => ({
+        text: "unclear ???",
+        payload: {
+          model: "gpt-vision",
+          reasoningEffort: "medium",
+          inputMode: "url",
+          messages: [],
+        },
+      }),
+      tesseractRunner: async () => ({
+        text: "Invoice total 12,500 due 2026-04-30",
+        command: "fake-tesseract",
+        args: ["page.png"],
+      }),
+    })
+
+    const compareJob = getJob("job-1")
+
+    assert.ok(compareJob)
+    assert.equal(compareJob.detail.compareRows[1]?.winner, "Tesseract")
+    assert.match(
+      compareJob.detail.compareRows[1]?.reason ?? "",
+      /LLM terlihat low-confidence/
+    )
+    assert.equal(
+      (compareJob.detail.compareRows[1]?.scores?.tesseract ?? 0) >
+        (compareJob.detail.compareRows[1]?.scores?.llm ?? 0),
+      true
+    )
+  } finally {
+    if (initialJobDetails["job-1"]?.pages[1]) {
+      initialJobDetails["job-1"].pages[1]!.imagePath = originalImagePath
+    }
+  }
+})
+
+test("uploaded compare job uses real compare lane artifacts and persists compare audit", async () => {
+  const file = new File(
+    [buildPdfBuffer("Compare Upload")],
+    "compare-upload.pdf",
+    {
+      type: "application/pdf",
+    }
+  )
+  const formData = new FormData()
+  formData.set("mode", "Both compare")
+  formData.set("output", "MD + TXT")
+  formData.append("files", file)
+
+  const uploadResponse = await uploadJobsRoute(
+    new Request("http://localhost/api/jobs/upload", {
+      method: "POST",
+      body: formData,
+    })
+  )
+  const uploadPayload = await uploadResponse.json()
+  const uploadedJob = uploadPayload.jobs.find(
+    (job: { name: string }) => job.name === "compare-upload.pdf"
+  )
+
+  assert.ok(uploadedJob)
+
+  await startJobRoute(
+    new Request("http://localhost/api/jobs/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jobId: uploadedJob.id }),
+    })
+  )
+
+  const { runWorkers } = await import("@/lib/job-actions")
+  await runWorkers({
     llmRunner: async ({ imageUrl }) => ({
       text: `LLM rich text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
@@ -211,82 +348,18 @@ test("compare lane stores both OCR and LLM summaries with winner", async () => {
     }),
   })
 
-  const compareJob = getJob("job-1")
+  const compareJob = getJob(uploadedJob.id)
+  const outputPayload = getJobOutput(uploadedJob.id)
 
   assert.ok(compareJob)
+  assert.ok(outputPayload)
   assert.match(compareJob.detail.outputPreview.text, /Compare Output/)
-  assert.match(
-    compareJob.detail.compareRows[0]?.llmSummary ?? "",
-    /LLM rich text for/
-  )
-  assert.match(
-    compareJob.detail.compareRows[0]?.tesseractSummary ?? "",
-    /OCR text for/
-  )
   assert.equal(compareJob.detail.compareRows[0]?.winner, "LLM")
-  assert.match(
-    compareJob.detail.compareRows[0]?.reason ?? "",
-    /skor gabungan panjang/
-  )
-  assert.ok(compareJob.detail.compareRows[0]?.scores)
-  assert.equal(
-    (compareJob.detail.compareRows[0]?.scores?.llm ?? 0) >=
-      (compareJob.detail.compareRows[0]?.scores?.tesseract ?? 0),
-    true
-  )
-  assert.match(
-    compareJob.detail.events.join("\n"),
-    /OCR \+ vision compare execution/
-  )
-
-  if (initialJobDetails["job-1"]?.pages[0]) {
-    initialJobDetails["job-1"].pages[0]!.imagePath = originalImagePath
-  }
-})
-
-test("compare lane chooses Tesseract when LLM output looks low confidence", async () => {
-  const { runPreparedJobsOnce } = await import("@/lib/job-store")
-  const originalImagePath = initialJobDetails["job-1"]?.pages[0]?.imagePath
-
-  if (initialJobDetails["job-1"]?.pages[0]) {
-    initialJobDetails["job-1"].pages[0]!.imagePath =
-      "/tmp/mock-compare-page-1.png"
-  }
-
-  await runPreparedJobsOnce({
-    llmRunner: async () => ({
-      text: "unclear ???",
-      payload: {
-        model: "gpt-vision",
-        reasoningEffort: "medium",
-        inputMode: "url",
-        messages: [],
-      },
-    }),
-    tesseractRunner: async () => ({
-      text: "Invoice total 12,500 due 2026-04-30",
-      command: "fake-tesseract",
-      args: ["page.png"],
-    }),
-  })
-
-  const compareJob = getJob("job-1")
-
-  assert.ok(compareJob)
-  assert.equal(compareJob.detail.compareRows[0]?.winner, "Tesseract")
-  assert.match(
-    compareJob.detail.compareRows[0]?.reason ?? "",
-    /LLM terlihat low-confidence/
-  )
-  assert.equal(
-    (compareJob.detail.compareRows[0]?.scores?.tesseract ?? 0) >
-      (compareJob.detail.compareRows[0]?.scores?.llm ?? 0),
-    true
-  )
-
-  if (initialJobDetails["job-1"]?.pages[0]) {
-    initialJobDetails["job-1"].pages[0]!.imagePath = originalImagePath
-  }
+  assert.match(compareJob.detail.compareRows[0]?.reason ?? "", /skor gabungan/)
+  assert.equal(outputPayload.compareAudit?.[0]?.winner, "LLM")
+  assert.match(outputPayload.preview.text, /Compare Output/)
+  assert.ok(compareJob.detail.pages[0]?.imagePath)
+  assert.match(compareJob.detail.events.join("\n"), /OCR \+ vision compare execution/)
 })
 
 test("tesseract-only lane stores OCR text into output preview", async () => {

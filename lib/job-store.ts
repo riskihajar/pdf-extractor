@@ -420,8 +420,10 @@ function countPendingPages(detail: Pick<JobDetail, "pages">) {
   ).length
 }
 
-function hasRealPageArtifacts(detail: Pick<JobDetail, "pages">) {
-  return detail.pages.every((page) => Boolean(page.imagePath))
+function hasRunnableCompareArtifacts(detail: Pick<JobDetail, "pages">) {
+  return detail.pages.some(
+    (page) => page.status === "Extracting" && Boolean(page.imagePath)
+  )
 }
 
 function buildWorkerProcessedPreview(job: JobRecord, detail: JobDetail) {
@@ -966,17 +968,24 @@ async function applyCompareWorkerRun(
 ): Promise<JobMutation> {
   const llmOutputs: string[] = []
   const tesseractOutputs: string[] = []
+  const processedOutputs = new Map<
+    string,
+    {
+      llm: string
+      tesseract: string
+    }
+  >()
   const nextPages = detail.pages.map((page) => ({ ...page }))
   const lane = getWorkerLaneLabel(job)
 
   for (let index = 0; index < nextPages.length; index += 1) {
     const page = nextPages[index]
 
-    if (!page || page.status !== "Extracting") {
+    if (!page || page.status !== "Extracting" || !page.imagePath) {
       continue
     }
 
-    const imagePath = page.imagePath ?? `/tmp/${job.id}-${index + 1}.png`
+    const imagePath = page.imagePath
     const [llmResult, tesseractResult] = await Promise.all([
       llmRunner({
         imageUrl: imagePath,
@@ -987,6 +996,10 @@ async function applyCompareWorkerRun(
 
     llmOutputs.push(`### ${page.page}\n\n${llmResult.text}`)
     tesseractOutputs.push(`### ${page.page}\n\n${tesseractResult.text}`)
+    processedOutputs.set(page.page, {
+      llm: llmResult.text,
+      tesseract: tesseractResult.text,
+    })
 
     nextPages[index] = {
       ...page,
@@ -1042,30 +1055,24 @@ async function applyCompareWorkerRun(
         llmOutputs,
         tesseractOutputs
       ),
-      compareRows: detail.compareRows.map((row, index) => ({
-        ...row,
-        winner: chooseCompareWinner(
-          llmOutputs[index]?.replace(/^### .*\n\n/, "") || row.llmSummary,
-          tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
-            row.tesseractSummary
-        ) as "LLM" | "Tesseract",
-        reason: explainCompareWinner(
-          llmOutputs[index]?.replace(/^### .*\n\n/, "") || row.llmSummary,
-          tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
-            row.tesseractSummary
-        ),
-        scores: scoreCompareOutputs(
-          llmOutputs[index]?.replace(/^### .*\n\n/, "") || row.llmSummary,
-          tesseractOutputs[index]?.replace(/^### .*\n\n/, "") ||
-            row.tesseractSummary
-        ),
-        llmSummary:
-          llmOutputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
-          row.llmSummary,
-        tesseractSummary:
-          tesseractOutputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
-          row.tesseractSummary,
-      })),
+      compareRows: detail.compareRows.map((row) => {
+        const processedRow = processedOutputs.get(row.page)
+        const llmText = processedRow?.llm ?? row.llmSummary
+        const tesseractText = processedRow?.tesseract ?? row.tesseractSummary
+
+        return {
+          ...row,
+          winner: chooseCompareWinner(
+            llmText,
+            tesseractText
+          ) as "LLM" | "Tesseract",
+          reason: explainCompareWinner(llmText, tesseractText),
+          scores: scoreCompareOutputs(llmText, tesseractText),
+          llmSummary: processedRow?.llm.slice(0, 120) ?? row.llmSummary,
+          tesseractSummary:
+            processedRow?.tesseract.slice(0, 120) ?? row.tesseractSummary,
+        }
+      }),
       pipeline: detail.pipeline.map((step, index) => {
         if (index === 2) {
           return {
@@ -2316,7 +2323,7 @@ export async function runPreparedJobsOnce(
       continue
     }
 
-    if (job.mode === "Both compare" && hasRealPageArtifacts(detail)) {
+    if (job.mode === "Both compare" && hasRunnableCompareArtifacts(detail)) {
       const llmRunner = options.llmRunner ?? runLlmPage
       const tesseractRunner = options.tesseractRunner ?? runTesseractPage
 
