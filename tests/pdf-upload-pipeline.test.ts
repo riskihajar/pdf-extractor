@@ -139,7 +139,7 @@ test("multipart upload rejects invalid PDF files with structured errors", async 
 
 test("multipart upload rejects oversized PDF files with structured errors", async () => {
   const oversizedPdf = new File(
-    [Buffer.alloc(10 * 1024 * 1024 + 1, 0)],
+    [Buffer.alloc(25 * 1024 * 1024 + 1, 0)],
     "oversized.pdf",
     {
       type: "application/pdf",
@@ -162,7 +162,7 @@ test("multipart upload rejects oversized PDF files with structured errors", asyn
   assert.deepEqual(payload.errors, [
     {
       fileName: "oversized.pdf",
-      message: "File exceeds 10 MB upload limit",
+      message: "File exceeds 25 MB upload limit",
     },
   ])
 })
