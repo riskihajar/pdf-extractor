@@ -1,10 +1,12 @@
 export type LlmRuntimeConfig = {
   baseUrl: string
+  apiStyle: string
   model: string
   reasoningEffort: string
   hasApiKey: boolean
   examplePdfPath?: string
   imageInputMode: string
+  stream?: boolean
 }
 
 export type TesseractRuntimeConfig = {
@@ -16,11 +18,13 @@ export type TesseractRuntimeConfig = {
 export function getLlmRuntimeConfig(): LlmRuntimeConfig {
   return {
     baseUrl: process.env.LLM_BASE_URL ?? "",
+    apiStyle: process.env.LLM_API_STYLE ?? "responses",
     model: process.env.LLM_MODEL ?? "",
     reasoningEffort: process.env.LLM_REASONING_EFFORT ?? "medium",
     hasApiKey: Boolean(process.env.LLM_API_KEY),
     examplePdfPath: process.env.EXAMPLE_PDF_PATH_TO_EXTRACT,
     imageInputMode: process.env.LLM_IMAGE_INPUT_MODE ?? "data_url",
+    stream: process.env.LLM_STREAM === "true",
   }
 }
 

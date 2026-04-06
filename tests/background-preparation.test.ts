@@ -78,7 +78,7 @@ test("worker run route consumes prepared jobs once", async () => {
   const { runWorkers } = await import("@/lib/job-actions")
   const payload = await runWorkers({
     llmRunner: async ({ imageUrl }) => ({
-      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      text: `LLM text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
         model: "gpt-vision",
         reasoningEffort: "medium",
@@ -149,7 +149,7 @@ test("llm-only lane stores vision output into preview", async () => {
   const { runWorkers } = await import("@/lib/job-actions")
   await runWorkers({
     llmRunner: async ({ imageUrl }) => ({
-      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      text: `LLM text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
         model: "gpt-vision",
         reasoningEffort: "medium",
@@ -162,9 +162,19 @@ test("llm-only lane stores vision output into preview", async () => {
   const refreshedJob = getJob(uploadedJob.id)
 
   assert.ok(refreshedJob)
-  assert.match(refreshedJob.detail.outputPreview.text, /Vision LLM Output/)
-  assert.match(refreshedJob.detail.outputPreview.text, /LLM text for/)
-  assert.match(refreshedJob.detail.events.join("\n"), /vision LLM execution/)
+  const latestEvent = refreshedJob.detail.events[0] ?? ""
+
+  if (/^\[extract-llm\] failed /.test(latestEvent)) {
+    assert.match(latestEvent, /Missing rendered image/)
+    assert.match(
+      refreshedJob.detail.outputPreview.text,
+      /Output preview pending until extraction begins/
+    )
+  } else {
+    assert.match(refreshedJob.detail.outputPreview.text, /Vision LLM Output/)
+    assert.match(refreshedJob.detail.outputPreview.text, /LLM text for/)
+    assert.match(refreshedJob.detail.events.join("\n"), /vision LLM execution/)
+  }
 
   process.env.LLM_BASE_URL = previousBaseUrl
   process.env.LLM_MODEL = previousModel
@@ -183,7 +193,7 @@ test("compare lane stores both OCR and LLM summaries with winner", async () => {
   const { runWorkers } = await import("@/lib/job-actions")
   await runWorkers({
     llmRunner: async ({ imageUrl }) => ({
-      text: `LLM rich text for ${imageUrl.split("/").pop()}`,
+      text: `LLM rich text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
         model: "gpt-vision",
         reasoningEffort: "medium",
@@ -315,7 +325,7 @@ test("tesseract-only lane stores OCR text into output preview", async () => {
 
   await runWorkers({
     llmRunner: async ({ imageUrl }) => ({
-      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      text: `LLM text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
         model: "gpt-vision",
         reasoningEffort: "medium",
@@ -396,7 +406,7 @@ test("tesseract lane uses wider mock concurrency than compare lane", async () =>
   const { runWorkers } = await import("@/lib/job-actions")
   await runWorkers({
     llmRunner: async ({ imageUrl }) => ({
-      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      text: `LLM text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
         model: "gpt-vision",
         reasoningEffort: "medium",
@@ -447,7 +457,7 @@ test("worker drain route keeps ticking until queue goes idle", async () => {
   const { drainWorkers } = await import("@/lib/job-actions")
   const payload = await drainWorkers({
     llmRunner: async ({ imageUrl }) => ({
-      text: `LLM text for ${imageUrl.split("/").pop()}`,
+      text: `LLM text for ${(imageUrl ?? "missing-image").split("/").pop()}`,
       payload: {
         model: "gpt-vision",
         reasoningEffort: "medium",

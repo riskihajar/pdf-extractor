@@ -12,7 +12,7 @@ import {
   type OutputFormat,
 } from "@/lib/dashboard-data"
 import type { PipelineResult, UploadedPdfMetadata } from "@/lib/pdf-pipeline"
-import { runLlmPage, type LlmRunner } from "@/lib/llm-runtime"
+import { readImageDataUrl, runLlmPage, type LlmRunner } from "@/lib/llm-runtime"
 import { runTesseractPage, type TesseractRunner } from "@/lib/tesseract-runtime"
 
 export type JobStoreState = {
@@ -819,11 +819,45 @@ async function applyLlmWorkerRun(
       continue
     }
 
-    const imageUrl = page.imagePath ?? `/tmp/${job.id}-${index + 1}.png`
-    const result = await runner({
-      imageUrl,
-      prompt: `Extract the page content for ${page.page}`,
-    })
+    const imageUrl = page.imagePath
+    let result: Awaited<ReturnType<LlmRunner>>
+
+    try {
+      if (!page.imagePath || !imageUrl) {
+        throw new Error(`Missing rendered image for ${page.page}`)
+      }
+
+      const imageDataUrl = await readImageDataUrl(page.imagePath)
+      result = await runner({
+        imageUrl,
+        imageDataUrl,
+        prompt: `Extract the page content for ${page.page}`,
+      })
+    } catch (error) {
+      nextPages[index] = {
+        ...page,
+        imagePath: imageUrl,
+        llm: "Failed",
+        status: "Waiting",
+        note: `LLM error on ${page.page}: ${error instanceof Error ? error.message : String(error)}`,
+      }
+
+      return {
+        job: {
+          ...job,
+          status: "Processing",
+        },
+        detail: {
+          ...detail,
+          pages: nextPages,
+          events: [
+            `[extract-llm] failed ${page.page}: ${error instanceof Error ? error.message : String(error)}`,
+            ...detail.events,
+          ].slice(0, 12),
+        },
+      }
+    }
+
     outputs.push(`### ${page.page}\n\n${result.text}`)
 
     nextPages[index] = {
