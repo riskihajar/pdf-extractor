@@ -8,6 +8,7 @@ import {
   buildTesseractCommand,
   getTesseractRuntimeStatus,
   runTesseractPage,
+  testTesseractRuntimeConnection,
 } from "@/lib/tesseract-runtime"
 
 test("buildTesseractCommand includes language and optional tessdata dir", () => {
@@ -97,4 +98,32 @@ test("runTesseractPage surfaces binary failure details", async () => {
       }),
     /bad image/
   )
+})
+
+test("testTesseractRuntimeConnection reports missing binary", async () => {
+  const result = await testTesseractRuntimeConnection({
+    binaryPath: "/tmp/does-not-exist-tesseract",
+    language: "eng",
+    dataPath: "",
+  })
+
+  assert.equal(result.status, "error")
+  assert.match(result.message, /tidak ditemukan/i)
+})
+
+test("testTesseractRuntimeConnection reports executable version", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tesseract-test-"))
+  const binaryPath = join(tempDir, "tesseract")
+
+  await writeFile(binaryPath, "#!/bin/sh\nprintf 'tesseract 5.3.0\\n'\n")
+  await chmod(binaryPath, 0o755)
+
+  const result = await testTesseractRuntimeConnection({
+    binaryPath,
+    language: "eng",
+    dataPath: "",
+  })
+
+  assert.equal(result.status, "ok")
+  assert.match(result.version ?? "", /tesseract 5\.3\.0/)
 })

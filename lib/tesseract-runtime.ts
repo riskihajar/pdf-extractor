@@ -21,6 +21,17 @@ export type TesseractPageResult = {
   args: string[]
 }
 
+export type TesseractConnectionTestResult = {
+  status: "ok" | "error"
+  message: string
+  binaryPath: string
+  language: string
+  checkedAt: string
+  latencyMs: number
+  detail?: string
+  version?: string
+}
+
 export type TesseractRunner = (
   imagePath: string,
   config?: TesseractRuntimeConfig
@@ -82,13 +93,67 @@ export async function runTesseractPage(
   }
 }
 
+export async function testTesseractRuntimeConnection(
+  config: TesseractRuntimeConfig = getTesseractRuntimeConfig()
+): Promise<TesseractConnectionTestResult> {
+  const checkedAt = new Date().toISOString()
+  const startedAt = Date.now()
+  const runtime = await getTesseractRuntimeStatus(config)
+
+  if (runtime.status !== "ready") {
+    return {
+      status: "error",
+      message: "Binary Tesseract tidak ditemukan.",
+      binaryPath: config.binaryPath,
+      language: config.language,
+      checkedAt,
+      latencyMs: Date.now() - startedAt,
+      detail: `Path ${config.binaryPath} tidak bisa diakses`,
+    }
+  }
+
+  try {
+    const { stdout } = await runTesseractCommand(config.binaryPath, [
+      "--version",
+    ])
+    const version = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean)
+
+    return {
+      status: "ok",
+      message: "Tesseract runtime reachable dan executable.",
+      binaryPath: config.binaryPath,
+      language: config.language,
+      checkedAt,
+      latencyMs: Date.now() - startedAt,
+      version,
+    }
+  } catch (error) {
+    return {
+      status: "error",
+      message: "Perintah test Tesseract gagal dijalankan.",
+      binaryPath: config.binaryPath,
+      language: config.language,
+      checkedAt,
+      latencyMs: Date.now() - startedAt,
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 async function runTesseractCommand(command: string, args: string[]) {
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
     })
 
+    let stdout = ""
     let stderr = ""
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString()
+    })
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString()
     })
@@ -96,7 +161,7 @@ async function runTesseractCommand(command: string, args: string[]) {
     child.on("error", reject)
     child.on("close", (code) => {
       if (code === 0) {
-        resolve()
+        resolve({ stdout, stderr })
         return
       }
 

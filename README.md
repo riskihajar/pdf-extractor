@@ -40,6 +40,7 @@ Yang sudah ada saat ini:
 - lane `LLM only` sekarang sudah menjalankan extraction nyata via OpenAI-like `chat/completions` dengan image base64 dari artifact render,
 - compare audit trail sekarang menyimpan winner, reason, dan score per halaman,
 - route internal aman untuk status runtime LLM,
+- route internal connection test untuk runtime LLM dan Tesseract,
 - helper server-side untuk membaca env lokal tanpa mengekspos secret ke UI,
 - dokumentasi produk dan tracking progres.
 
@@ -47,11 +48,9 @@ Yang masih belum selesai:
 
 - worker/background queue terpisah penuh di luar proses app,
 - queue runtime nyata dengan concurrency per lane,
-- compare lane real end-to-end untuk semua jalur uploaded job,
 - export pipeline final,
-- download output final,
 - cancel/pause job,
-- connection test/healthcheck runtime LLM yang lebih eksplisit.
+- log runtime per page untuk jalur compare yang lebih eksplisit.
 
 ## Product Workflow
 
@@ -125,12 +124,15 @@ Catatan:
 Route internal yang sudah tersedia:
 
 - `GET /api/config/llm`
+- `POST /api/config/llm/test`
 - `GET /api/config/tesseract`
+- `POST /api/config/tesseract/test`
 - `GET /api/jobs`
 - `GET /api/jobs/:id`
 - `GET /api/jobs/:id/pages`
 - `GET /api/jobs/:id/logs`
 - `GET /api/jobs/:id/output`
+- `GET /api/jobs/:id/output/download?format=markdown|text`
 - `POST /api/jobs/upload`
 - `POST /api/jobs/start`
 - `POST /api/jobs/start-all`

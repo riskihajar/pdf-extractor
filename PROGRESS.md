@@ -83,10 +83,12 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Tambahkan helper server-side untuk baca env di `lib/env.ts`
 - [x] Lindungi secret agar tidak terekspos ke client
 - [x] Tambahkan route `GET /api/config/llm`
+- [x] Tambahkan route `POST /api/config/llm/test`
 - [x] Tampilkan status runtime LLM di dashboard
 - [x] Tampilkan status API key dan example PDF path secara aman
 - [x] Tambahkan status/runtime config Tesseract
-- [ ] Tambahkan connection test ke endpoint LLM nyata
+- [x] Tambahkan route `POST /api/config/tesseract/test`
+- [x] Tambahkan connection test ke endpoint LLM nyata
 
 ## 8. Internal API Draft
 
@@ -140,7 +142,7 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Preview UI untuk `.txt`
 - [~] Generate markdown nyata dari hasil extraction
 - [~] Generate text nyata dari hasil extraction
-- [ ] Download output final
+- [x] Download output final
 - [ ] Partial export jika ada halaman gagal
 
 ## 13. Observability and Logs
@@ -187,6 +189,6 @@ Dokumen ini melacak progres implementasi fitur PDF Extractor berdasarkan kondisi
 - [x] Simpan hasil extraction per engine ke store granular
 - [x] Sambungkan tab `Compare` dan `Output` ke hasil extraction nyata
 - [x] Selesaikan compare lane real end-to-end untuk uploaded job dengan artifact nyata
-- [ ] Rapikan export/download final `.md` dan `.txt` berbasis winner/current engine output
-- [ ] Tambahkan connection test runtime LLM/Tesseract dari dashboard atau route internal
+- [x] Rapikan export/download final `.md` dan `.txt` berbasis winner/current engine output
+- [x] Tambahkan connection test runtime LLM/Tesseract dari dashboard atau route internal
 - [ ] Tambahkan log runtime per page yang lebih eksplisit untuk jalur real compare

@@ -10,6 +10,7 @@ import {
   getLlmRuntimeStatus,
   readImageDataUrl,
   runLlmPage,
+  testLlmRuntimeConnection,
 } from "@/lib/llm-runtime"
 
 test("getLlmRuntimeStatus reports missing config by default", () => {
@@ -122,7 +123,10 @@ test("runLlmPage posts payload and returns output text", async () => {
   })
   ;(
     globalThis as unknown as { __testGenerateText?: unknown }
-  ).__testGenerateText = async (_args: unknown) => ({ text: "ok:true" })
+  ).__testGenerateText = async (args: unknown) => {
+    void args
+    return { text: "ok:true" }
+  }
 
   const result = await runLlmPage({
     imageDataUrl: "data:image/png;base64,abc123",
@@ -227,4 +231,89 @@ test("readImageDataUrl encodes PNG file to data URL", async () => {
   const dataUrl = await readImageDataUrl(filePath)
 
   assert.match(dataUrl, /^data:image\/png;base64,/)
+})
+
+test("testLlmRuntimeConnection reports missing config", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  delete process.env.LLM_BASE_URL
+  delete process.env.LLM_MODEL
+  delete process.env.LLM_API_KEY
+
+  const result = await testLlmRuntimeConnection()
+
+  assert.equal(result.status, "missing_config")
+  assert.match(result.message, /belum lengkap/i)
+  assert.equal(result.latencyMs, 0)
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
+})
+
+test("testLlmRuntimeConnection posts a lightweight responses probe", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+  const previousApiStyle = process.env.LLM_API_STYLE
+  let calledUrl = ""
+  let calledMethod = ""
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+  process.env.LLM_API_STYLE = "responses"
+  ;(globalThis as unknown as { __testFetch?: typeof fetch }).__testFetch =
+    async (input, init) => {
+      calledUrl = String(input)
+      calledMethod = init?.method ?? ""
+
+      return new Response(JSON.stringify({ id: "resp_1" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      })
+    }
+
+  const result = await testLlmRuntimeConnection()
+
+  assert.equal(result.status, "ok")
+  assert.equal(result.httpStatus, 200)
+  assert.equal(calledMethod, "POST")
+  assert.equal(calledUrl, "https://api.example.com/v1/responses")
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
+  process.env.LLM_API_STYLE = previousApiStyle
+  delete (globalThis as unknown as { __testFetch?: typeof fetch }).__testFetch
+})
+
+test("testLlmRuntimeConnection reports endpoint failure status", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+  const previousApiStyle = process.env.LLM_API_STYLE
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+  process.env.LLM_API_STYLE = "responses"
+  ;(globalThis as unknown as { __testFetch?: typeof fetch }).__testFetch =
+    async () => new Response("unauthorized", { status: 401 })
+
+  const result = await testLlmRuntimeConnection()
+
+  assert.equal(result.status, "error")
+  assert.equal(result.httpStatus, 401)
+  assert.match(result.detail ?? "", /unauthorized/)
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
+  process.env.LLM_API_STYLE = previousApiStyle
+  delete (globalThis as unknown as { __testFetch?: typeof fetch }).__testFetch
 })

@@ -28,6 +28,16 @@ export type LlmPageResult = {
   payload: Record<string, unknown>
 }
 
+export type LlmConnectionTestResult = {
+  status: "ok" | "error" | "missing_config"
+  message: string
+  endpoint: string
+  checkedAt: string
+  latencyMs: number
+  httpStatus?: number
+  detail?: string
+}
+
 type ParsedLlmResponse = {
   text?: string
   choices?: Array<{
@@ -115,6 +125,102 @@ export function buildLlmPagePayload(request: LlmPageRequest) {
   }
 }
 
+export async function testLlmRuntimeConnection(): Promise<LlmConnectionTestResult> {
+  const config = getLlmRuntimeConfig()
+  const checkedAt = new Date().toISOString()
+
+  if (!hasLlmRuntimeConfig(config)) {
+    return {
+      status: "missing_config",
+      message: "LLM runtime belum lengkap. Isi base URL, model, dan API key.",
+      endpoint: maskBaseUrl(config.baseUrl),
+      checkedAt,
+      latencyMs: 0,
+    }
+  }
+
+  const endpoint = buildLlmConnectionEndpoint(config.baseUrl, config.apiStyle)
+  const payload =
+    config.apiStyle === "chat_completions"
+      ? {
+          model: config.model,
+          stream: false,
+          max_tokens: 1,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Connection test: reply with OK.",
+                },
+              ],
+            },
+          ],
+        }
+      : {
+          model: config.model,
+          stream: false,
+          max_output_tokens: 1,
+          input: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: "Connection test: reply with OK.",
+                },
+              ],
+            },
+          ],
+        }
+  const startedAt = Date.now()
+
+  try {
+    const response = await getRuntimeFetch()(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.LLM_API_KEY ?? ""}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const latencyMs = Date.now() - startedAt
+
+    if (!response.ok) {
+      const errorText = (await response.text()).trim()
+
+      return {
+        status: "error",
+        message: `LLM endpoint merespons status ${response.status}`,
+        endpoint: maskBaseUrl(endpoint),
+        checkedAt,
+        latencyMs,
+        httpStatus: response.status,
+        detail: errorText.slice(0, 240) || "empty response body",
+      }
+    }
+
+    return {
+      status: "ok",
+      message: "LLM runtime reachable dan menerima request test.",
+      endpoint: maskBaseUrl(endpoint),
+      checkedAt,
+      latencyMs,
+      httpStatus: response.status,
+    }
+  } catch (error) {
+    return {
+      status: "error",
+      message: "Gagal menghubungi endpoint LLM.",
+      endpoint: maskBaseUrl(endpoint),
+      checkedAt,
+      latencyMs: Date.now() - startedAt,
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 export async function runLlmPage(
   request: LlmPageRequest
 ): Promise<LlmPageResult> {
@@ -130,12 +236,6 @@ export async function runLlmPage(
       __testOpenAIProvider?: typeof createOpenAI
     }
   ).__testOpenAIProvider
-  const testFetch = (
-    globalThis as unknown as {
-      __testFetch?: typeof fetch
-    }
-  ).__testFetch
-
   if (config.apiStyle === "chat_completions") {
     const endpoint = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`
     const chatPayload = {
@@ -164,7 +264,7 @@ export async function runLlmPage(
       stream: config.stream,
     }
 
-    const response = await (testFetch ?? fetch)(endpoint, {
+    const response = await getRuntimeFetch()(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -235,6 +335,42 @@ export async function runLlmPage(
     text: result.text,
     payload,
   }
+}
+
+function buildLlmConnectionEndpoint(baseUrl: string, apiStyle: string) {
+  const normalizedBase = baseUrl.replace(/\/+$/, "")
+
+  if (apiStyle === "chat_completions") {
+    if (normalizedBase.endsWith("/chat/completions")) {
+      return normalizedBase
+    }
+
+    if (normalizedBase.endsWith("/responses")) {
+      return `${normalizedBase.slice(0, -"/responses".length)}/chat/completions`
+    }
+
+    return `${normalizedBase}/chat/completions`
+  }
+
+  if (normalizedBase.endsWith("/responses")) {
+    return normalizedBase
+  }
+
+  if (normalizedBase.endsWith("/chat/completions")) {
+    return `${normalizedBase.slice(0, -"/chat/completions".length)}/responses`
+  }
+
+  return `${normalizedBase}/responses`
+}
+
+function getRuntimeFetch() {
+  const testFetch = (
+    globalThis as unknown as {
+      __testFetch?: typeof fetch
+    }
+  ).__testFetch
+
+  return testFetch ?? fetch
 }
 
 function maskBaseUrl(value: string) {

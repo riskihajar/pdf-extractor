@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import { GET as getJobRoute } from "@/app/api/jobs/[id]/route"
 import { GET as getJobLogsRoute } from "@/app/api/jobs/[id]/logs/route"
 import { GET as getJobOutputRoute } from "@/app/api/jobs/[id]/output/route"
+import { GET as downloadJobOutputRoute } from "@/app/api/jobs/[id]/output/download/route"
 import { GET as getJobPagesRoute } from "@/app/api/jobs/[id]/pages/route"
 import { GET as getPagePreviewRoute } from "@/app/api/pages/[id]/preview/route"
 import { POST as retryJobRoute } from "@/app/api/jobs/[id]/retry/route"
@@ -174,6 +175,40 @@ test("GET /api/jobs/:id/output returns normalized job output", async () => {
   assert.match(payload.preview.markdown, /bank-statement-april\.pdf/)
   assert.ok(Array.isArray(payload.compareAudit))
   assert.equal(payload.compareAudit[0]?.page, "Page 01")
+})
+
+test("GET /api/jobs/:id/output/download returns markdown attachment", async () => {
+  const response = await downloadJobOutputRoute(
+    new Request("http://localhost/api/jobs/job-1/output/download?format=markdown"),
+    {
+      params: Promise.resolve({ id: "job-1" }),
+    }
+  )
+  const body = await response.text()
+
+  assert.equal(response.status, 200)
+  assert.equal(
+    response.headers.get("content-type"),
+    "text/markdown; charset=utf-8"
+  )
+  assert.equal(
+    response.headers.get("content-disposition"),
+    'attachment; filename="bank-statement-april.md"'
+  )
+  assert.match(body, /bank-statement-april\.pdf/)
+})
+
+test("GET /api/jobs/:id/output/download rejects formats outside job preset", async () => {
+  const response = await downloadJobOutputRoute(
+    new Request("http://localhost/api/jobs/job-2/output/download?format=text"),
+    {
+      params: Promise.resolve({ id: "job-2" }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 400)
+  assert.equal(payload.message, "Requested format is not enabled for this job")
 })
 
 test("POST /api/jobs/upload stores uploaded jobs in shared SQLite state", async () => {

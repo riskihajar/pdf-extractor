@@ -49,13 +49,28 @@ const filters = ["All jobs", "Failed pages", "Compare mode"] as const
 
 type Filter = (typeof filters)[number]
 
-type RuntimeStatus = {
+type LlmRuntimeStatus = {
   status: string
   baseUrl: string
   model: string
   reasoningEffort: string
   hasApiKey: boolean
   hasExamplePdfPath: boolean
+}
+
+type TesseractRuntimeStatus = {
+  status: string
+  binaryPath: string
+  language: string
+  hasDataPath: boolean
+}
+
+type RuntimeConnectionCheck = {
+  status: "ok" | "error" | "missing_config"
+  message: string
+  checkedAt: string
+  latencyMs: number
+  detail?: string
 }
 
 type OutputSourceSnapshot = {
@@ -93,6 +108,21 @@ type DetailTabSyncOptions = {
   forcePagesRefresh?: boolean
 }
 
+function buildOutputDownloadUrl(
+  jobId: string,
+  format: "markdown" | "text"
+) {
+  return `/api/jobs/${encodeURIComponent(jobId)}/output/download?format=${format}`
+}
+
+function formatRuntimeCheck(check: RuntimeConnectionCheck | null) {
+  if (!check) {
+    return "belum diuji"
+  }
+
+  return `${check.message} · ${check.latencyMs}ms`
+}
+
 export function DashboardShell({ initialState }: DashboardShellProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [jobs, setJobs] = useState<JobRecord[]>(() => initialState.jobs)
@@ -108,7 +138,17 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>("Pages")
   const [pickedFiles, setPickedFiles] = useState<File[]>([])
   const [uploadIssues, setUploadIssues] = useState<UploadIssue[]>([])
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null)
+  const [llmRuntimeStatus, setLlmRuntimeStatus] =
+    useState<LlmRuntimeStatus | null>(null)
+  const [tesseractRuntimeStatus, setTesseractRuntimeStatus] =
+    useState<TesseractRuntimeStatus | null>(null)
+  const [llmConnectionCheck, setLlmConnectionCheck] =
+    useState<RuntimeConnectionCheck | null>(null)
+  const [tesseractConnectionCheck, setTesseractConnectionCheck] =
+    useState<RuntimeConnectionCheck | null>(null)
+  const [isLlmConnectionTesting, setIsLlmConnectionTesting] = useState(false)
+  const [isTesseractConnectionTesting, setIsTesseractConnectionTesting] =
+    useState(false)
   const [workerDiagnostics, setWorkerDiagnostics] =
     useState<WorkerDiagnostics | null>(null)
   const [outputSources, setOutputSources] = useState<
@@ -160,6 +200,10 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   const activeDetail = activeJob
     ? (jobDetails[activeJob.id] ?? createJobDetail(activeJob))
     : null
+  const canDownloadMarkdown =
+    activeJob?.output === "Markdown" || activeJob?.output === "MD + TXT"
+  const canDownloadText =
+    activeJob?.output === "Text" || activeJob?.output === "MD + TXT"
   const shouldRefreshPages =
     activeJob && activeDetail && activeTab === "Pages"
       ? shouldAutoRefreshPages(activeJob, activeDetail.pages)
@@ -276,24 +320,66 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     return payload
   }, [])
 
+  const runLlmConnectionTest = useCallback(async () => {
+    setIsLlmConnectionTesting(true)
+
+    try {
+      const response = await fetch("/api/config/llm/test", { method: "POST" })
+      const payload = (await response.json()) as RuntimeConnectionCheck
+      setLlmConnectionCheck(payload)
+    } catch (error) {
+      setLlmConnectionCheck({
+        status: "error",
+        message: "LLM connection test gagal dipanggil dari dashboard.",
+        checkedAt: new Date().toISOString(),
+        latencyMs: 0,
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsLlmConnectionTesting(false)
+    }
+  }, [])
+
+  const runTesseractConnectionTest = useCallback(async () => {
+    setIsTesseractConnectionTesting(true)
+
+    try {
+      const response = await fetch("/api/config/tesseract/test", {
+        method: "POST",
+      })
+      const payload = (await response.json()) as RuntimeConnectionCheck
+      setTesseractConnectionCheck(payload)
+    } catch (error) {
+      setTesseractConnectionCheck({
+        status: "error",
+        message: "Tesseract runtime test gagal dipanggil dari dashboard.",
+        checkedAt: new Date().toISOString(),
+        latencyMs: 0,
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setIsTesseractConnectionTesting(false)
+    }
+  }, [])
+
   useEffect(() => {
     let ignore = false
 
-    async function loadRuntimeStatus() {
+    async function loadLlmRuntimeStatus() {
       try {
         const response = await fetch("/api/config/llm")
         if (!response.ok) {
           return
         }
 
-        const payload = (await response.json()) as RuntimeStatus
+        const payload = (await response.json()) as LlmRuntimeStatus
 
         if (!ignore) {
-          setRuntimeStatus(payload)
+          setLlmRuntimeStatus(payload)
         }
       } catch {
         if (!ignore) {
-          setRuntimeStatus({
+          setLlmRuntimeStatus({
             status: "unreachable",
             baseUrl: "unreachable",
             model: "unreachable",
@@ -305,7 +391,42 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
       }
     }
 
-    void loadRuntimeStatus()
+    void loadLlmRuntimeStatus()
+
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let ignore = false
+
+    async function loadTesseractRuntimeStatus() {
+      try {
+        const response = await fetch("/api/config/tesseract")
+
+        if (!response.ok) {
+          return
+        }
+
+        const payload = (await response.json()) as TesseractRuntimeStatus
+
+        if (!ignore) {
+          setTesseractRuntimeStatus(payload)
+        }
+      } catch {
+        if (!ignore) {
+          setTesseractRuntimeStatus({
+            status: "unreachable",
+            binaryPath: "unreachable",
+            language: "unknown",
+            hasDataPath: false,
+          })
+        }
+      }
+    }
+
+    void loadTesseractRuntimeStatus()
 
     return () => {
       ignore = true
@@ -773,13 +894,24 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                   <ConfigCard
                     label="LLM runtime"
                     value={
-                      runtimeStatus?.status === "ready"
+                      llmRuntimeStatus?.status === "ready"
                         ? "Ready"
-                        : runtimeStatus?.status === "unreachable"
+                        : llmRuntimeStatus?.status === "unreachable"
                           ? "Offline"
                           : "Needs config"
                     }
-                    hint={`${runtimeStatus?.model ?? "Loading model"} · ${runtimeStatus?.baseUrl ?? "Loading endpoint"}`}
+                    hint={`${llmRuntimeStatus?.model ?? "Loading model"} · ${llmRuntimeStatus?.baseUrl ?? "Loading endpoint"}`}
+                  />
+                  <ConfigCard
+                    label="Tesseract runtime"
+                    value={
+                      tesseractRuntimeStatus?.status === "ready"
+                        ? "Ready"
+                        : tesseractRuntimeStatus?.status === "unreachable"
+                          ? "Offline"
+                          : "Missing binary"
+                    }
+                    hint={`${tesseractRuntimeStatus?.language ?? "unknown"} · ${tesseractRuntimeStatus?.binaryPath ?? "Loading binary path"}`}
                   />
                   <div className="rounded-[1.1rem] border border-white/10 bg-white/5 p-3">
                     <p className="text-[11px] tracking-[0.2em] text-stone-500 uppercase">
@@ -800,12 +932,47 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                     </p>
                     <p className="mt-3 text-xs leading-5 text-stone-500">
                       API key:{" "}
-                      {runtimeStatus?.hasApiKey ? "detected" : "missing"} ·
+                      {llmRuntimeStatus?.hasApiKey ? "detected" : "missing"} ·
                       Example PDF path:{" "}
-                      {runtimeStatus?.hasExamplePdfPath
+                      {llmRuntimeStatus?.hasExamplePdfPath
                         ? "available"
                         : "not set"}
                     </p>
+                    <div className="mt-3 border-t border-white/10 pt-3">
+                      <p className="text-[11px] tracking-[0.2em] text-stone-500 uppercase">
+                        Runtime checks
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-full border-white/15 bg-white/5 text-stone-100 hover:bg-white/10"
+                          disabled={isLlmConnectionTesting}
+                          onClick={() => void runLlmConnectionTest()}
+                        >
+                          {isLlmConnectionTesting
+                            ? "Testing LLM..."
+                            : "Test LLM connection"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-full border-white/15 bg-white/5 text-stone-100 hover:bg-white/10"
+                          disabled={isTesseractConnectionTesting}
+                          onClick={() => void runTesseractConnectionTest()}
+                        >
+                          {isTesseractConnectionTesting
+                            ? "Testing Tesseract..."
+                            : "Test Tesseract runtime"}
+                        </Button>
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-stone-400">
+                        LLM: {formatRuntimeCheck(llmConnectionCheck)}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-stone-400">
+                        Tesseract: {formatRuntimeCheck(tesseractConnectionCheck)}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1190,12 +1357,31 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                   <div className="grid gap-4 lg:grid-cols-2">
                     <article className="rounded-[1.35rem] border border-white/10 bg-black/10 p-4">
                       <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
-                        <h3 className="text-sm font-medium text-white">
-                          Markdown output
-                        </h3>
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] tracking-[0.2em] text-stone-300 uppercase">
-                          .md
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-sm font-medium text-white">
+                            Markdown output
+                          </h3>
+                          <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] tracking-[0.2em] text-stone-300 uppercase">
+                            .md
+                          </span>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-full border-white/15 bg-white/5 text-stone-100 hover:bg-white/10"
+                          disabled={!activeJob || !canDownloadMarkdown}
+                          onClick={() => {
+                            if (!activeJob || !canDownloadMarkdown) {
+                              return
+                            }
+
+                            window.location.assign(
+                              buildOutputDownloadUrl(activeJob.id, "markdown")
+                            )
+                          }}
+                        >
+                          Download .md
+                        </Button>
                       </div>
                       <pre className="mt-4 overflow-x-auto font-mono text-xs leading-6 whitespace-pre-wrap text-stone-300">
                         {activeDetail?.outputPreview.markdown}
@@ -1208,12 +1394,31 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                     </article>
                     <article className="rounded-[1.35rem] border border-white/10 bg-black/10 p-4">
                       <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
-                        <h3 className="text-sm font-medium text-white">
-                          Text output
-                        </h3>
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] tracking-[0.2em] text-stone-300 uppercase">
-                          .txt
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-sm font-medium text-white">
+                            Text output
+                          </h3>
+                          <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] tracking-[0.2em] text-stone-300 uppercase">
+                            .txt
+                          </span>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-full border-white/15 bg-white/5 text-stone-100 hover:bg-white/10"
+                          disabled={!activeJob || !canDownloadText}
+                          onClick={() => {
+                            if (!activeJob || !canDownloadText) {
+                              return
+                            }
+
+                            window.location.assign(
+                              buildOutputDownloadUrl(activeJob.id, "text")
+                            )
+                          }}
+                        >
+                          Download .txt
+                        </Button>
                       </div>
                       <pre className="mt-4 overflow-x-auto font-mono text-xs leading-6 whitespace-pre-wrap text-stone-300">
                         {activeDetail?.outputPreview.text}
