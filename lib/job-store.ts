@@ -483,9 +483,36 @@ function buildCompareOutputPreview(
 }
 
 function chooseCompareWinner(llmText: string, tesseractText: string) {
-  return llmText.trim().length >= tesseractText.trim().length
-    ? "LLM"
-    : "Tesseract"
+  const normalizedLlm = llmText.trim()
+  const normalizedTesseract = tesseractText.trim()
+
+  if (!normalizedLlm && normalizedTesseract) {
+    return "Tesseract"
+  }
+
+  if (!normalizedTesseract && normalizedLlm) {
+    return "LLM"
+  }
+
+  const llmWordCount = normalizedLlm.split(/\s+/).filter(Boolean).length
+  const tesseractWordCount = normalizedTesseract
+    .split(/\s+/)
+    .filter(Boolean).length
+
+  const llmPenalty = /\?{3,}|\bunclear\b|\bunknown\b/i.test(normalizedLlm)
+    ? 8
+    : 0
+  const tesseractPenalty = /\?{3,}|\bunclear\b|\bunknown\b/i.test(
+    normalizedTesseract
+  )
+    ? 8
+    : 0
+
+  const llmScore = normalizedLlm.length + llmWordCount * 2 - llmPenalty
+  const tesseractScore =
+    normalizedTesseract.length + tesseractWordCount * 2 - tesseractPenalty
+
+  return llmScore >= tesseractScore ? "LLM" : "Tesseract"
 }
 
 function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {

@@ -221,6 +221,43 @@ test("compare lane stores both OCR and LLM summaries with winner", async () => {
   process.env.LLM_API_KEY = previousApiKey
 })
 
+test("compare lane chooses Tesseract when LLM output looks low confidence", async () => {
+  const previousBaseUrl = process.env.LLM_BASE_URL
+  const previousModel = process.env.LLM_MODEL
+  const previousApiKey = process.env.LLM_API_KEY
+
+  process.env.LLM_BASE_URL = "https://api.example.com/v1/responses"
+  process.env.LLM_MODEL = "gpt-vision"
+  process.env.LLM_API_KEY = "secret"
+
+  const { runWorkers } = await import("@/lib/job-actions")
+  await runWorkers({
+    llmRunner: async () => ({
+      text: "unclear ???",
+      payload: {
+        model: "gpt-vision",
+        reasoningEffort: "medium",
+        inputMode: "url",
+        messages: [],
+      },
+    }),
+    tesseractRunner: async () => ({
+      text: "Invoice total 12,500 due 2026-04-30",
+      command: "fake-tesseract",
+      args: ["page.png"],
+    }),
+  })
+
+  const compareJob = getJob("job-1")
+
+  assert.ok(compareJob)
+  assert.equal(compareJob.detail.compareRows[0]?.winner, "Tesseract")
+
+  process.env.LLM_BASE_URL = previousBaseUrl
+  process.env.LLM_MODEL = previousModel
+  process.env.LLM_API_KEY = previousApiKey
+})
+
 test("tesseract-only lane stores OCR text into output preview", async () => {
   const uploadResponse = await uploadJobsRoute(
     new Request("http://localhost/api/jobs/upload", {
