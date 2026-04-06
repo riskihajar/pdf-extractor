@@ -91,6 +91,61 @@ test("worker run route consumes prepared jobs once", async () => {
   assert.match(refreshedJob.detail.outputPreview.markdown, /Worker output/)
 })
 
+test("tesseract-only lane stores OCR text into output preview", async () => {
+  const uploadResponse = await uploadJobsRoute(
+    new Request("http://localhost/api/jobs/upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        files: ["ocr-real.pdf"],
+        mode: "Tesseract only",
+        output: "Text",
+      }),
+    })
+  )
+  const uploadPayload = await uploadResponse.json()
+  const uploadedJob = uploadPayload.jobs.find(
+    (job: { mode: string }) => job.mode === "Tesseract only"
+  )
+
+  assert.ok(uploadedJob)
+
+  await startJobRoute(
+    new Request("http://localhost/api/jobs/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jobId: uploadedJob.id }),
+    })
+  )
+
+  const { runWorkers } = await import("@/lib/job-actions")
+  const startedJob = getJob(uploadedJob.id)
+
+  assert.ok(startedJob)
+
+  await runWorkers({
+    tesseractRunner: async (imagePath) => ({
+      text: `OCR text for ${imagePath.split("/").pop()}`,
+      command: "fake-tesseract",
+      args: [imagePath],
+    }),
+  })
+
+  const refreshedJob = getJob(uploadedJob.id)
+
+  assert.ok(refreshedJob)
+  assert.match(refreshedJob.detail.outputPreview.text, /Tesseract OCR/)
+  assert.match(refreshedJob.detail.outputPreview.text, /OCR text for/)
+  assert.match(
+    refreshedJob.detail.events.join("\n"),
+    /real Tesseract execution/
+  )
+})
+
 test("tesseract lane uses wider mock concurrency than compare lane", async () => {
   await runWorkersRoute()
 
@@ -125,7 +180,14 @@ test("tesseract lane uses wider mock concurrency than compare lane", async () =>
     })
   )
 
-  await runWorkersRoute()
+  const { runWorkers } = await import("@/lib/job-actions")
+  await runWorkers({
+    tesseractRunner: async (imagePath) => ({
+      text: `OCR text for ${imagePath.split("/").pop()}`,
+      command: "fake-tesseract",
+      args: [imagePath],
+    }),
+  })
 
   const ocrJob = getJob(uploadedOcrJob.id)
 
@@ -138,18 +200,16 @@ test("tesseract lane uses wider mock concurrency than compare lane", async () =>
   )
   assert.ok(
     ocrJob.detail.events.some((event) =>
-      /via extract-ocr .*concurrency 2/.test(event)
+      /via extract-ocr .*real Tesseract execution/.test(event)
     )
   )
   assert.ok(
     ocrJob.detail.events.some((event) =>
-      /^\[extract-ocr\] completed Page 01/.test(event)
+      /^\[extract-ocr\] OCR completed for Page 01/.test(event)
     )
   )
   assert.ok(
-    ocrJob.detail.events.some((event) =>
-      /^\[extract-ocr\] started Page 02/.test(event)
-    )
+    ocrJob.detail.events.some((event) => /real Tesseract execution/.test(event))
   )
   assert.equal(
     ocrJob.detail.pages.filter((page) => page.status === "Extracting").length,

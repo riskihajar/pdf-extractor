@@ -26,6 +26,7 @@ import {
 import { attachPagePreviewUrl } from "@/lib/page-preview"
 import { preparePdfPipeline } from "@/lib/pdf-pipeline"
 import { storeUploadedPdf } from "@/lib/pdf-storage"
+import type { TesseractRunner } from "@/lib/tesseract-runtime"
 
 export type UploadJobsRequest = {
   files?: string[]
@@ -175,8 +176,10 @@ export function getWorkerDiagnostics(): WorkerDiagnosticsResponse {
   return getWorkerDiagnosticsState()
 }
 
-export function runWorkers(): RunWorkersResponse {
-  return runPreparedJobsOnce()
+export async function runWorkers(options?: {
+  tesseractRunner?: TesseractRunner
+}) {
+  return runPreparedJobsOnce(options)
 }
 
 export function getJob(jobId: string): GetJobResponse | null {

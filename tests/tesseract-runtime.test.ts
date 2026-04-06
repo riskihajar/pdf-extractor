@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -7,6 +7,7 @@ import test from "node:test"
 import {
   buildTesseractCommand,
   getTesseractRuntimeStatus,
+  runTesseractPage,
 } from "@/lib/tesseract-runtime"
 
 test("buildTesseractCommand includes language and optional tessdata dir", () => {
@@ -53,4 +54,47 @@ test("getTesseractRuntimeStatus reports ready when binary path exists", async ()
   assert.equal(status.status, "ready")
   assert.equal(status.hasDataPath, true)
   assert.equal(status.binaryPath, binaryPath)
+})
+
+test("runTesseractPage executes binary and reads generated text", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tesseract-runner-"))
+  const binaryPath = join(tempDir, "tesseract")
+  const imagePath = join(tempDir, "page-1.png")
+
+  await writeFile(
+    binaryPath,
+    '#!/bin/sh\nout="$2.txt"\nprintf \'OCR READY\\n\' > "$out"\n'
+  )
+  await chmod(binaryPath, 0o755)
+  await writeFile(imagePath, "fake-image")
+
+  const result = await runTesseractPage(imagePath, {
+    binaryPath,
+    language: "eng",
+    dataPath: "",
+  })
+
+  assert.equal(result.text, "OCR READY")
+  assert.equal(result.command, binaryPath)
+  assert.deepEqual(result.args, [imagePath, result.args[1], "-l", "eng"])
+})
+
+test("runTesseractPage surfaces binary failure details", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tesseract-runner-fail-"))
+  const binaryPath = join(tempDir, "tesseract")
+  const imagePath = join(tempDir, "page-1.png")
+
+  await writeFile(binaryPath, "#!/bin/sh\nprintf 'bad image' >&2\nexit 1\n")
+  await chmod(binaryPath, 0o755)
+  await writeFile(imagePath, "fake-image")
+
+  await assert.rejects(
+    () =>
+      runTesseractPage(imagePath, {
+        binaryPath,
+        language: "eng",
+        dataPath: "",
+      }),
+    /bad image/
+  )
 })

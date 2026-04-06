@@ -12,6 +12,7 @@ import {
   type OutputFormat,
 } from "@/lib/dashboard-data"
 import type { PipelineResult, UploadedPdfMetadata } from "@/lib/pdf-pipeline"
+import { runTesseractPage, type TesseractRunner } from "@/lib/tesseract-runtime"
 
 export type JobStoreState = {
   jobs: JobRecord[]
@@ -102,6 +103,10 @@ type WorkerRunMutation = {
     job: JobRecord
     detail: JobDetail
   }>
+}
+
+type WorkerRunOptions = {
+  tesseractRunner?: TesseractRunner
 }
 
 type JobRow = {
@@ -430,6 +435,15 @@ function getWorkerLaneLabel(job: Pick<JobRecord, "mode">) {
   return "extract-llm"
 }
 
+function buildTesseractOutputPreview(job: JobRecord, outputs: string[]) {
+  const body = outputs.length > 0 ? outputs.join("\n\n") : "No OCR output yet"
+
+  return {
+    markdown: `# ${job.name}\n\n## Tesseract OCR\n\n${body}`,
+    text: `${job.name}\n\nTesseract OCR\n\n${body}`,
+  }
+}
+
 function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
   const concurrency = getWorkerConcurrency(job)
   const lane = getWorkerLaneLabel(job)
@@ -546,6 +560,121 @@ function applyWorkerRun(job: JobRecord, detail: JobDetail): JobMutation {
   return {
     job: nextJob,
     detail: nextDetail,
+  }
+}
+
+async function applyTesseractWorkerRun(
+  job: JobRecord,
+  detail: JobDetail,
+  runner: TesseractRunner
+): Promise<JobMutation> {
+  const outputs: string[] = []
+  const nextPages = detail.pages.map((page) => ({ ...page }))
+  const concurrency = getWorkerConcurrency(job)
+  const lane = getWorkerLaneLabel(job)
+
+  for (let index = 0; index < nextPages.length; index += 1) {
+    const page = nextPages[index]
+
+    if (!page || page.status !== "Extracting") {
+      continue
+    }
+
+    const imagePath = page.imagePath ?? `/tmp/${job.id}-${index + 1}.png`
+    const result = await runner(imagePath)
+    outputs.push(`### ${page.page}\n\n${result.text}`)
+
+    nextPages[index] = {
+      ...page,
+      imagePath,
+      tesseract: "Done",
+      status: "Compared",
+      note: `${page.page} selesai diekstrak oleh Tesseract runtime nyata`,
+    }
+  }
+
+  let activeSlots = 0
+  nextPages.forEach((page, index) => {
+    if (page.status !== "Waiting" || activeSlots >= concurrency) {
+      return
+    }
+
+    activeSlots += 1
+    nextPages[index] = {
+      ...page,
+      tesseract: "Running",
+      status: "Extracting",
+      note: `${page.page} sedang menunggu hasil OCR dari Tesseract runtime (slot ${activeSlots}/${concurrency})`,
+    }
+  })
+
+  const comparedPages = nextPages.filter(
+    (page) => page.status === "Compared"
+  ).length
+  const nextJob: JobRecord = {
+    ...job,
+    status: comparedPages >= job.pages ? "Completed" : "Processing",
+    progress: Math.min(Math.max(job.progress, 35) + comparedPages * 10, 100),
+    rendered: Math.max(job.rendered, job.pages),
+    extracted: comparedPages,
+  }
+
+  return {
+    job: nextJob,
+    detail: {
+      ...detail,
+      background: buildBackgroundState(nextJob, detail.background.preparedAt),
+      subtitle: "Tesseract OCR runtime is extracting rendered pages",
+      compareSummary: `${comparedPages} halaman sudah punya hasil OCR nyata dari Tesseract`,
+      pages: nextPages,
+      events: [
+        ...nextPages
+          .filter((page) => page.status === "Compared")
+          .map((page) => `[${lane}] OCR completed for ${page.page}`),
+        `Worker tick consumed ${nextJob.name} via ${lane} with real Tesseract execution`,
+        ...detail.events,
+      ].slice(0, 12),
+      outputPreview: buildTesseractOutputPreview(nextJob, outputs),
+      compareRows: detail.compareRows.map((row, index) => ({
+        ...row,
+        tesseractSummary:
+          outputs[index]?.replace(/^### .*\n\n/, "").slice(0, 120) ||
+          row.tesseractSummary,
+      })),
+      pipeline: detail.pipeline.map((step, index) => {
+        if (index === 2) {
+          return {
+            ...step,
+            title:
+              nextJob.status === "Completed"
+                ? "Tesseract OCR completed"
+                : "Tesseract OCR running",
+            detail:
+              nextJob.status === "Completed"
+                ? "Semua halaman selesai diekstrak oleh binary Tesseract"
+                : "Binary Tesseract sedang memproses batch halaman aktif",
+            state: nextJob.status === "Completed" ? "done" : "active",
+          }
+        }
+
+        if (index === 3) {
+          return {
+            ...step,
+            title:
+              nextJob.status === "Completed"
+                ? "OCR output ready"
+                : "OCR output warming up",
+            detail:
+              nextJob.status === "Completed"
+                ? "Preview output terisi dari hasil OCR nyata"
+                : "Preview output mulai terisi dari halaman yang sudah selesai OCR",
+            state: nextJob.status === "Completed" ? "done" : "active",
+          }
+        }
+
+        return step
+      }),
+    },
   }
 }
 
@@ -1653,24 +1782,37 @@ export function getWorkerDiagnosticsState(): WorkerDiagnosticsState {
   }
 }
 
-export function runPreparedJobsOnce(): WorkerRunMutation {
+export async function runPreparedJobsOnce(
+  options: WorkerRunOptions = {}
+): Promise<WorkerRunMutation> {
   const db = getDatabase()
   const state = readStateFromDatabase(db)
-  const processedJobs = state.jobs
-    .map((job) => {
-      const detail = state.details[job.id]
+  const processedJobs: JobMutation[] = []
 
-      if (!detail?.background || detail.background.status !== "prepared") {
-        return null
-      }
+  for (const job of state.jobs) {
+    const detail = state.details[job.id]
 
-      if (job.status !== "Queued" && job.status !== "Processing") {
-        return null
-      }
+    if (!detail?.background || detail.background.status !== "prepared") {
+      continue
+    }
 
-      return applyWorkerRun(job, detail)
-    })
-    .filter((mutation): mutation is JobMutation => mutation !== null)
+    if (job.status !== "Queued" && job.status !== "Processing") {
+      continue
+    }
+
+    if (job.mode === "Tesseract only") {
+      processedJobs.push(
+        await applyTesseractWorkerRun(
+          job,
+          detail,
+          options.tesseractRunner ?? runTesseractPage
+        )
+      )
+      continue
+    }
+
+    processedJobs.push(applyWorkerRun(job, detail))
+  }
 
   withTransaction(db, () => {
     processedJobs.forEach((mutation) => {
