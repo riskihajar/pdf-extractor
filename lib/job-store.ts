@@ -54,6 +54,15 @@ export type JobOutputPayload = {
       text: string
     }>
   }
+  compareAudit?: Array<{
+    page: string
+    winner: "LLM" | "Tesseract" | "Tie"
+    reason?: string
+    scores?: {
+      llm: number
+      tesseract: number
+    }
+  }>
 }
 
 export type JobPagesPayload = {
@@ -2413,6 +2422,12 @@ export function getJobOutputById(jobId: string): JobOutputPayload | null {
           text: page.note.slice(5).trim(),
         })),
     },
+    compareAudit: result.detail.compareRows.map((row) => ({
+      page: row.page,
+      winner: row.winner,
+      reason: row.reason,
+      scores: row.scores,
+    })),
   }
 }
 

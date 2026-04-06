@@ -172,6 +172,8 @@ test("GET /api/jobs/:id/output returns normalized job output", async () => {
   assert.equal(payload.jobId, "job-1")
   assert.equal(payload.output, "MD + TXT")
   assert.match(payload.preview.markdown, /bank-statement-april\.pdf/)
+  assert.ok(Array.isArray(payload.compareAudit))
+  assert.equal(payload.compareAudit[0]?.page, "Page 01")
 })
 
 test("POST /api/jobs/upload stores uploaded jobs in shared SQLite state", async () => {

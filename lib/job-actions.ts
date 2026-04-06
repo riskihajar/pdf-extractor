@@ -143,6 +143,15 @@ export type GetJobOutputResponse = {
       text: string
     }>
   }
+  compareAudit?: Array<{
+    page: string
+    winner: "LLM" | "Tesseract" | "Tie"
+    reason?: string
+    scores?: {
+      llm: number
+      tesseract: number
+    }
+  }>
 }
 
 export type GetJobPagesResponse = {
