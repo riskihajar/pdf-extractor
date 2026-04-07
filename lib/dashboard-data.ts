@@ -10,7 +10,7 @@ export type JobStatus =
   | "Completed"
 export type EngineState = "Ready" | "Queued" | "Running" | "Done" | "Failed"
 export type PageStatus = "Waiting" | "Extracting" | "Compared" | "Needs review"
-export type DetailTab = "Pages" | "Compare" | "Output" | "Logs"
+export type DetailTab = "Pages" | "Compare" | "Result" | "Logs"
 
 export type JobRecord = {
   id: string
@@ -105,7 +105,7 @@ export const heroStats = [
   },
 ]
 
-export const detailTabs: DetailTab[] = ["Pages", "Compare", "Output", "Logs"]
+export const detailTabs: DetailTab[] = ["Pages", "Compare", "Result", "Logs"]
 
 export const initialJobs: JobRecord[] = [
   {

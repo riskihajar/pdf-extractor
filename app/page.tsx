@@ -1,4 +1,4 @@
-import { DashboardShell } from "@/components/dashboard/dashboard-shell"
+import { Dashboard } from "@/components/dashboard/dashboard"
 import { getJobs, type GetJobsResponse } from "@/lib/job-actions"
 
 async function getInitialJobsState(): Promise<GetJobsResponse> {
@@ -8,5 +8,5 @@ async function getInitialJobsState(): Promise<GetJobsResponse> {
 export default async function Page() {
   const initialState = await getInitialJobsState()
 
-  return <DashboardShell initialState={initialState} />
+  return <Dashboard initialState={initialState} />
 }
