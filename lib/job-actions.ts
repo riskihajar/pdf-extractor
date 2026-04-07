@@ -18,6 +18,7 @@ import {
   runPreparedJobsOnce,
   runPreparedJobsUntilIdle,
   reserveNextJobId,
+  createStoredUpload,
   retryPageById,
   retryJobById,
   pauseJobById,
@@ -28,7 +29,7 @@ import {
   overrideCompareWinnerByPage,
 } from "@/lib/job-store"
 import { attachPagePreviewUrl } from "@/lib/page-preview"
-import { preparePdfPipeline } from "@/lib/pdf-pipeline"
+import { createStagedUpload, preparePdfPipeline } from "@/lib/pdf-pipeline"
 import { storeUploadedPdf } from "@/lib/pdf-storage"
 import type { LlmRunner } from "@/lib/llm-runtime"
 import type { TesseractRunner } from "@/lib/tesseract-runtime"
@@ -203,6 +204,19 @@ export function buildUploadedJobs({
 }
 
 export function startJob({ jobId }: StartJobRequest): StartJobResponse | null {
+  const current = getJobById(jobId)
+
+  if (!current) {
+    return null
+  }
+
+  const uploadedFile = getUploadedFileByJobId(jobId)
+  const renderArtifacts = getRenderArtifactsByJobId(jobId)
+
+  if (uploadedFile && renderArtifacts.length === 0) {
+    return null
+  }
+
   return startJobById({ jobId })
 }
 
@@ -268,9 +282,9 @@ export async function uploadPdfFile(
 ) {
   const stored = await storeUploadedPdf(file)
   const jobId = reserveNextJobId()
-  const pipeline = await preparePdfPipeline(stored, mode, output, jobId)
+  const pipeline = createStagedUpload(stored, mode, output, jobId)
 
-  return createUploadedJob({ pipeline })
+  return createStoredUpload(pipeline)
 }
 
 export function getJobRenderArtifacts(jobId: string) {

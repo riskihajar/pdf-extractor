@@ -11,7 +11,11 @@ import {
   type JobRecord,
   type OutputFormat,
 } from "@/lib/dashboard-data"
-import type { PipelineResult, UploadedPdfMetadata } from "@/lib/pdf-pipeline"
+import type {
+  PipelineResult,
+  StagedUploadResult,
+  UploadedPdfMetadata,
+} from "@/lib/pdf-pipeline"
 import { readImageDataUrl, runLlmPage, type LlmRunner } from "@/lib/llm-runtime"
 import { runTesseractPage, type TesseractRunner } from "@/lib/tesseract-runtime"
 
@@ -103,7 +107,13 @@ type CreateJobsInput = {
 }
 
 type CreateUploadedJobInput = {
-  pipeline: PipelineResult
+  pipeline: PipelineResult | StagedUploadResult
+}
+
+type CreateStoredUploadInput = {
+  job: JobRecord
+  detail: JobDetail
+  metadata: UploadedPdfMetadata
 }
 
 type UpdateJobInput = {
@@ -256,7 +266,7 @@ const JOB_STORE_DIR = join(process.cwd(), ".data")
 const JOB_STORE_PATH =
   process.env.PDF_EXTRACTOR_JOB_DB_PATH ||
   join(JOB_STORE_DIR, `jobs${getTestIsolationSuffix()}.sqlite`)
-const JOB_STORE_SCHEMA_VERSION = 10
+const JOB_STORE_SCHEMA_VERSION = 11
 
 const globalStore = globalThis as typeof globalThis & {
   __pdfExtractorJobDatabase__?: DatabaseSync
@@ -1470,6 +1480,12 @@ function writeRenderArtifacts(db: DatabaseSync, pipeline: PipelineResult) {
   })
 }
 
+function hasRenderedPages(
+  pipeline: PipelineResult | StagedUploadResult
+): pipeline is PipelineResult {
+  return "renderedPages" in pipeline
+}
+
 function readLegacyDetails(db: DatabaseSync) {
   const detailRows = db
     .prepare(`SELECT job_id, payload FROM job_details ORDER BY job_id ASC`)
@@ -1611,7 +1627,7 @@ function applySchemaMigrations(db: DatabaseSync) {
         stored_path TEXT NOT NULL,
         mime_type TEXT NOT NULL,
         size_bytes INTEGER NOT NULL,
-        page_count INTEGER NOT NULL
+        page_count INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS render_artifacts (
@@ -1767,6 +1783,32 @@ function applySchemaMigrations(db: DatabaseSync) {
       `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
     ).run(10, new Date().toISOString())
   }
+
+  if (currentVersion < 11) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS uploaded_files_new (
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        storage_key TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        stored_path TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        page_count INTEGER
+      );
+
+      INSERT OR IGNORE INTO uploaded_files_new
+        SELECT job_id, storage_key, original_name, stored_path, mime_type, size_bytes, page_count
+        FROM uploaded_files;
+
+      DROP TABLE IF EXISTS uploaded_files;
+
+      ALTER TABLE uploaded_files_new RENAME TO uploaded_files;
+    `)
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`
+    ).run(11, new Date().toISOString())
+  }
 }
 
 function initializeDatabase(db: DatabaseSync) {
@@ -1870,7 +1912,7 @@ function initializeDatabase(db: DatabaseSync) {
       stored_path TEXT NOT NULL,
       mime_type TEXT NOT NULL,
       size_bytes INTEGER NOT NULL,
-      page_count INTEGER NOT NULL
+      page_count INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS render_artifacts (
@@ -3036,7 +3078,9 @@ export function createUploadedJob({ pipeline }: CreateUploadedJobInput) {
   withTransaction(db, () => {
     insertJob(db, pipeline.job, sortOrder, pipeline.detail)
     writeUploadedFileMetadata(db, pipeline.metadata, pipeline.job.id)
-    writeRenderArtifacts(db, pipeline)
+    if (hasRenderedPages(pipeline)) {
+      writeRenderArtifacts(db, pipeline)
+    }
   })
 
   return {
@@ -3045,11 +3089,37 @@ export function createUploadedJob({ pipeline }: CreateUploadedJobInput) {
   }
 }
 
+export function createStoredUpload({
+  job,
+  detail,
+  metadata,
+}: CreateStoredUploadInput) {
+  const db = getDatabase()
+  const sortOrder = getJobsCount(db)
+
+  withTransaction(db, () => {
+    insertJob(db, job, sortOrder, detail)
+    writeUploadedFileMetadata(db, metadata, job.id)
+  })
+
+  return {
+    job,
+    detail,
+  }
+}
+
 export function startJobById({ jobId }: UpdateJobInput) {
   const db = getDatabase()
   const current = getJobById(jobId)
 
   if (!current) {
+    return null
+  }
+
+  const uploadedFile = getUploadedFileByJobId(jobId)
+  const renderArtifacts = getRenderArtifactsByJobId(jobId)
+
+  if (uploadedFile && renderArtifacts.length === 0) {
     return null
   }
 

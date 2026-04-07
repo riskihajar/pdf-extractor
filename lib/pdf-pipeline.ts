@@ -1,8 +1,6 @@
-import { mkdir, readFile, readdir, rm } from "node:fs/promises"
+import { mkdir, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { spawn } from "node:child_process"
-
-import { PDFParse } from "pdf-parse"
 
 import type {
   ExtractionMode,
@@ -35,7 +33,13 @@ export type UploadedPdfMetadata = {
   storedPath: string
   mimeType: string
   sizeBytes: number
-  pageCount: number
+  pageCount: number | null
+}
+
+export type StagedUploadResult = {
+  metadata: UploadedPdfMetadata
+  job: JobRecord
+  detail: JobDetail
 }
 
 export type PipelineResult = {
@@ -111,19 +115,6 @@ async function runPdftoppm(pdfPath: string, outputPrefix: string) {
   })
 }
 
-async function extractPdfText(pdfPath: string) {
-  const parser = new PDFParse({ data: await readFile(pdfPath) })
-  try {
-    const result = await parser.getText()
-    return {
-      text: result.text.trim(),
-      pageCount: result.total,
-    }
-  } finally {
-    await parser.destroy()
-  }
-}
-
 function buildPageTasks(
   mode: ExtractionMode,
   renderedPages: RenderedPageArtifact[]
@@ -146,7 +137,6 @@ export async function preparePdfPipeline(
   output: OutputFormat,
   jobId: string
 ): Promise<PipelineResult> {
-  const { text, pageCount } = await extractPdfText(upload.storedPath)
   const renderDir = join(STORAGE_ROOT, "renders", jobId)
   const prefix = join(renderDir, "page")
 
@@ -169,7 +159,7 @@ export async function preparePdfPipeline(
   const job: JobRecord = {
     id: jobId,
     name: upload.originalName,
-    pages: Math.max(pageCount, renderedPages.length),
+    pages: renderedPages.length,
     mode,
     output,
     status: "Uploaded",
@@ -205,9 +195,7 @@ export async function preparePdfPipeline(
     events: [
       `Upload stored at ${upload.storedPath}`,
       `Render pipeline produced ${renderedPages.length} PNG artifact${renderedPages.length === 1 ? "" : "s"}`,
-      text
-        ? `Embedded PDF text detected for ${pageCount} page${pageCount === 1 ? "" : "s"}`
-        : "No embedded PDF text detected during intake",
+      `Render pipeline detected ${renderedPages.length} page${renderedPages.length === 1 ? "" : "s"}`,
     ],
     outputPreview: buildOutputPreview(
       upload.originalName,
@@ -271,6 +259,88 @@ export async function preparePdfPipeline(
       pageCount: job.pages,
     },
     renderedPages,
+    job,
+    detail,
+  }
+}
+
+export function createStagedUpload(
+  upload: StoredUpload,
+  mode: ExtractionMode,
+  output: OutputFormat,
+  jobId: string
+): StagedUploadResult {
+  const job: JobRecord = {
+    id: jobId,
+    name: upload.originalName,
+    pages: 0,
+    mode,
+    output,
+    status: "Uploaded",
+    progress: 0,
+    rendered: 0,
+    extracted: 0,
+    failed: 0,
+  }
+
+  const detail: JobDetail = {
+    title: upload.originalName,
+    subtitle: "PDF stored locally and waiting for render preparation",
+    compareSummary:
+      mode === "Both compare"
+        ? "Upload selesai. Job menunggu start untuk menyiapkan render dan compare pipeline"
+        : "Upload selesai. Job menunggu start untuk menyiapkan render dan extraction pipeline",
+    background: {
+      status: "idle",
+      worker: "render-worker",
+      queue: "render-pdf",
+      preparedAt: null,
+      summary:
+        "File sudah tersimpan, tetapi render artifact belum dibuat sampai job dijalankan",
+    },
+    pages: [],
+    events: [`Upload stored at ${upload.storedPath}`],
+    outputPreview: {
+      markdown: `# ${upload.originalName}\n\nUpload staged successfully. Render and extraction will start after you run the job.`,
+      text: `${upload.originalName}\n\nUpload staged successfully. Render and extraction will start after you run the job.`,
+    },
+    compareRows: [],
+    pipeline: [
+      {
+        title: "Upload stored",
+        detail: `Binary PDF saved to local dev storage at ${upload.storedPath}`,
+        state: "done",
+      },
+      {
+        title: "Page renders pending",
+        detail:
+          "PNG render artifacts will be created only after Start is triggered",
+        state: "pending",
+      },
+      {
+        title: "Extraction queue waiting",
+        detail:
+          "OCR and LLM lanes stay idle until render preparation completes",
+        state: "pending",
+      },
+      {
+        title: "Output aggregation pending",
+        detail:
+          "Output preview will stay staged until render and extraction produce real page data",
+        state: "pending",
+      },
+    ],
+  }
+
+  return {
+    metadata: {
+      storageKey: upload.storageKey,
+      originalName: upload.originalName,
+      storedPath: upload.storedPath,
+      mimeType: upload.mimeType,
+      sizeBytes: upload.size,
+      pageCount: null,
+    },
     job,
     detail,
   }

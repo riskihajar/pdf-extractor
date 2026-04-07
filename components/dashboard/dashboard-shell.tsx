@@ -107,6 +107,12 @@ type UploadIssue = {
   message: string
 }
 
+type UiNotice = {
+  tone: "success" | "error"
+  title: string
+  message: string
+}
+
 type DetailTabSyncOptions = {
   forcePagesRefresh?: boolean
 }
@@ -128,6 +134,10 @@ function diffTone(type: "same" | "llm-only" | "tesseract-only") {
     default:
       return "border-white/10 bg-white/5 text-stone-300"
   }
+}
+
+function isSeededJob(job: JobRecord) {
+  return /^job-\d+$/.test(job.id)
 }
 
 function formatRuntimeCheck(check: RuntimeConnectionCheck | null) {
@@ -152,6 +162,11 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   )
   const [activeTab, setActiveTab] = useState<DetailTab>("Pages")
   const [pickedFiles, setPickedFiles] = useState<File[]>([])
+  const [isUploadingBatch, setIsUploadingBatch] = useState(false)
+  const [uploadSuccessMessage, setUploadSuccessMessage] = useState<
+    string | null
+  >(null)
+  const [uiNotice, setUiNotice] = useState<UiNotice | null>(null)
   const [uploadIssues, setUploadIssues] = useState<UploadIssue[]>([])
   const [llmRuntimeStatus, setLlmRuntimeStatus] =
     useState<LlmRuntimeStatus | null>(null)
@@ -215,6 +230,8 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   const activeDetail = activeJob
     ? (jobDetails[activeJob.id] ?? createJobDetail(activeJob))
     : null
+  const uploadedJobs = jobs.filter((job) => !isSeededJob(job))
+  const hasUploadedJobs = uploadedJobs.length > 0
   const activeOutputMeta = activeDetail?.outputMeta
   const canDownloadMarkdown =
     activeJob?.output === "Markdown" || activeJob?.output === "MD + TXT"
@@ -534,58 +551,88 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
   }, [activeDetail, activeJob, activeTab, isDetailSyncing, updateJobPages])
 
   async function handleUploadBatch() {
-    setUploadIssues([])
-
-    const response =
-      pickedFiles.length > 0
-        ? await (async () => {
-            const formData = new FormData()
-            formData.set("mode", mode)
-            formData.set("output", output)
-            pickedFiles.forEach((file) => {
-              formData.append("files", file)
-            })
-
-            return fetch("/api/jobs/upload", {
-              method: "POST",
-              body: formData,
-            })
-          })()
-        : await fetch("/api/jobs/upload", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              files: [],
-              mode,
-              output,
-            }),
-          })
-
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as {
-        errors?: UploadIssue[]
-      } | null
-
-      setUploadIssues(payload?.errors ?? [])
+    if (pickedFiles.length === 0) {
+      const issues = [
+        {
+          fileName: "No file selected",
+          message: "Choose at least one PDF before staging the batch",
+        },
+      ]
+      setUploadIssues(issues)
+      setUploadSuccessMessage(null)
+      setUiNotice({
+        tone: "error",
+        title: "No PDF selected",
+        message: issues[0]!.message,
+      })
       return
     }
 
-    const payload = (await response.json()) as UploadJobsResponse
+    setUploadIssues([])
+    setUploadSuccessMessage(null)
+    setUiNotice(null)
+    setIsUploadingBatch(true)
 
-    setJobs((current) => [...payload.jobs, ...current])
-    setJobDetails((current) => ({
-      ...current,
-      ...payload.details,
-    }))
-    setActiveJobId(payload.jobs[0]?.id ?? activeJobId)
-    setActiveTab("Pages")
-    setPickedFiles([])
-    setUploadIssues(payload.errors ?? [])
+    try {
+      const formData = new FormData()
+      formData.set("mode", mode)
+      formData.set("output", output)
+      pickedFiles.forEach((file) => {
+        formData.append("files", file)
+      })
 
-    if (inputRef.current) {
-      inputRef.current.value = ""
+      const response = await fetch("/api/jobs/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string
+          errors?: UploadIssue[]
+        } | null
+
+        const issues = payload?.errors ?? []
+        setUploadIssues(issues)
+        setUiNotice({
+          tone: "error",
+          title: payload?.message ?? "Upload failed",
+          message:
+            issues[0]?.message ??
+            "The server rejected the upload batch. Check the validation panel for details.",
+        })
+        return
+      }
+
+      const payload = (await response.json()) as UploadJobsResponse
+
+      setJobs((current) => [...payload.jobs, ...current])
+      setJobDetails((current) => ({
+        ...current,
+        ...payload.details,
+      }))
+      setActiveJobId(payload.jobs[0]?.id ?? activeJobId)
+      setActiveTab("Pages")
+      setActiveFilter("All jobs")
+      setPickedFiles([])
+      setUploadIssues(payload.errors ?? [])
+      setUploadSuccessMessage(
+        `${payload.jobs.length} file berhasil di-upload ke staging. Render dan extraction belum jalan sampai pipeline prepare/start dijalankan.`
+      )
+      setUiNotice({
+        tone: "success",
+        title: "Upload stored",
+        message:
+          payload.jobs.length === 1
+            ? `${payload.jobs[0]?.name ?? "PDF"} berhasil tersimpan. Tahap render/extraction belum dimulai.`
+            : `${payload.jobs.length} PDF berhasil tersimpan. Tahap render/extraction belum dimulai.`,
+      })
+
+      if (inputRef.current) {
+        inputRef.current.value = ""
+      }
+    } finally {
+      setIsUploadingBatch(false)
     }
   }
 
@@ -595,6 +642,8 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     }
 
     setUploadIssues([])
+    setUploadSuccessMessage(null)
+    setUiNotice(null)
     setPickedFiles(Array.from(files))
   }
 
@@ -807,6 +856,25 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,183,77,0.22),_transparent_32%),radial-gradient(circle_at_top_right,_rgba(83,109,254,0.18),_transparent_28%),linear-gradient(180deg,_#17120d_0%,_#120f0b_38%,_#0d0c0b_100%)] text-stone-50">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-black/20 shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+          {uiNotice ? (
+            <div className="pointer-events-none fixed top-5 right-5 z-50 max-w-md">
+              <div
+                className={cn(
+                  "rounded-[1.2rem] border px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl",
+                  uiNotice.tone === "success"
+                    ? "border-emerald-300/25 bg-emerald-400/15 text-emerald-50"
+                    : "border-rose-300/25 bg-rose-400/15 text-rose-50"
+                )}
+              >
+                <p className="text-[11px] tracking-[0.22em] uppercase">
+                  {uiNotice.title}
+                </p>
+                <p className="mt-1 text-sm leading-6 opacity-95">
+                  {uiNotice.message}
+                </p>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-6 border-b border-white/10 px-5 py-6 lg:grid-cols-[1.3fr_0.7fr] lg:px-8 lg:py-8">
             <div className="space-y-5">
               <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/30 bg-amber-200/10 px-3 py-1 text-xs tracking-[0.28em] text-amber-100 uppercase">
@@ -863,7 +931,7 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
             </div>
           </div>
 
-          <div className="grid gap-4 px-5 py-5 lg:grid-cols-[1.1fr_0.9fr] lg:px-8 lg:py-6">
+          <div className="grid gap-4 px-5 py-5 lg:px-8 lg:py-6">
             <section className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
@@ -884,9 +952,23 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                     />
                   ))}
                 </div>
+                {!hasUploadedJobs ? (
+                  <div className="rounded-[1.2rem] border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-50">
+                    Kamu masih melihat seeded demo jobs. Upload PDF sendiri lalu
+                    klik `Stage upload batch`, `Start`, dan `Run worker tick`
+                    untuk melihat render page, compare diff, dan output yang
+                    benar-benar berasal dari file lokalmu.
+                  </div>
+                ) : (
+                  <div className="rounded-[1.2rem] border border-emerald-300/20 bg-emerald-300/10 p-4 text-sm text-emerald-50">
+                    Real upload terdeteksi: {uploadedJobs.length} job lokal siap
+                    dites visual. Fokuskan review ke badge `Uploaded file` di
+                    queue board.
+                  </div>
+                )}
               </div>
 
-              <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
                 <div className="rounded-[1.4rem] border border-dashed border-amber-200/30 bg-[linear-gradient(135deg,rgba(255,214,153,0.14),rgba(255,255,255,0.02))] p-5">
                   <p className="text-xs tracking-[0.24em] text-amber-100 uppercase">
                     Drop zone
@@ -919,8 +1001,11 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                       variant="outline"
                       className="rounded-full border-white/15 bg-white/5 text-stone-100 hover:bg-white/10"
                       onClick={handleUploadBatch}
+                      disabled={isUploadingBatch}
                     >
-                      Stage upload batch
+                      {isUploadingBatch
+                        ? "Staging upload..."
+                        : "Stage upload batch"}
                     </Button>
                   </div>
                   <div className="mt-4 rounded-[1.1rem] border border-white/10 bg-black/15 p-3">
@@ -961,9 +1046,19 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                       </div>
                     </div>
                   ) : null}
+                  {uploadSuccessMessage ? (
+                    <div className="mt-3 rounded-[1.1rem] border border-emerald-300/20 bg-emerald-400/10 p-3">
+                      <p className="text-[11px] tracking-[0.2em] text-emerald-100 uppercase">
+                        Upload staged
+                      </p>
+                      <p className="mt-2 text-xs text-emerald-50/90">
+                        {uploadSuccessMessage}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="grid gap-3 rounded-[1.4rem] border border-white/10 bg-black/15 p-4 sm:grid-cols-2">
+                <div className="grid gap-3 rounded-[1.4rem] border border-white/10 bg-black/15 p-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                   <ConfigCard
                     label="Extraction mode"
                     value={mode}
@@ -1079,6 +1174,13 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                   <p className="mt-1 text-sm text-stone-400">
                     {activeDetail?.subtitle}
                   </p>
+                  <p className="mt-2 text-xs tracking-[0.18em] text-stone-500 uppercase">
+                    {activeJob
+                      ? isSeededJob(activeJob)
+                        ? "Demo seeded state"
+                        : "Real uploaded pipeline state"
+                      : "No file selected"}
+                  </p>
                 </div>
                 <span
                   className={cn(
@@ -1189,6 +1291,13 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
             </div>
 
             <div className="mt-4 overflow-hidden rounded-[1.5rem] border border-white/8">
+              {!hasUploadedJobs ? (
+                <div className="border-b border-white/8 bg-white/6 px-4 py-3 text-xs text-stone-300">
+                  Menampilkan seeded demo jobs agar layout dashboard tetap bisa
+                  direview. Upload PDF sendiri untuk memunculkan job nyata di
+                  urutan teratas.
+                </div>
+              ) : null}
               <div className="hidden grid-cols-[2.1fr_0.8fr_1fr_0.9fr_1.2fr_1fr] gap-3 bg-white/8 px-4 py-3 text-[11px] tracking-[0.2em] text-stone-400 uppercase md:grid">
                 <span>File</span>
                 <span>Pages</span>
@@ -1218,6 +1327,16 @@ export function DashboardShell({ initialState }: DashboardShellProps) {
                         <h3 className="text-sm font-medium text-white">
                           {job.name}
                         </h3>
+                        <span
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[10px] tracking-[0.2em] uppercase",
+                            isSeededJob(job)
+                              ? "border-white/10 text-stone-300"
+                              : "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"
+                          )}
+                        >
+                          {isSeededJob(job) ? "Demo seed" : "Uploaded file"}
+                        </span>
                         <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] tracking-[0.2em] text-stone-300 uppercase">
                           {job.output}
                         </span>
