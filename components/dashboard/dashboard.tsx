@@ -124,6 +124,7 @@ export function Dashboard({ initialState }: DashboardProps) {
     Record<string, OutputSourceSnapshot>
   >({})
   const [isDetailSyncing, setIsDetailSyncing] = useState(false)
+  const [isWorkerTicking, setIsWorkerTicking] = useState(false)
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState>({
     open: false,
     job: null,
@@ -325,6 +326,35 @@ export function Dashboard({ initialState }: DashboardProps) {
     })
     return cleanup ?? undefined
   }, [activeDetail, activeJob, activeTab, isDetailSyncing, updateJobPages])
+
+  useEffect(() => {
+    if (
+      !jobs.some(
+        (job) => job.status === "Queued" || job.status === "Processing"
+      )
+    ) {
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      if (isWorkerTicking) {
+        return
+      }
+
+      setIsWorkerTicking(true)
+      void fetch("/api/workers/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }).finally(() => {
+        setIsWorkerTicking(false)
+      })
+    }, 1500)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [isWorkerTicking, jobs])
 
   /* auto-dismiss notice */
   useEffect(() => {

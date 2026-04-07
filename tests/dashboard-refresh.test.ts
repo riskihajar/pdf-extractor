@@ -128,3 +128,5 @@ test("schedulePagesRefresh skips wiring when pages should not refresh", async ()
   assert.equal(cleanup, null)
   assert.equal(scheduleCalls, 0)
 })
+
+test.skip("processing jobs can be advanced by worker ticks after start", async () => {})
