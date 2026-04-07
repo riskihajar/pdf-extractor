@@ -37,3 +37,11 @@
 - shadcn is configured with the `base-mira` style and `hugeicons`; preserve existing aliases from `components.json` when adding UI primitives.
 - Use `shadcn` when doing UI work that needs existing registry components, examples, add commands, or project audit guidance; prefer it before hand-rolling visual primitives.
 - Use `context7` when you need current framework/library docs or API examples for repo dependencies like Next.js, React, Tailwind, shadcn, or AI SDK integrations.
+
+## UI product guidance
+
+- Read `UI_SPEC.md` before making substantial UI/layout changes.
+- Treat the app as a document extraction workspace, not a generic analytics/dashboard shell.
+- Use user-facing vocabulary like `Documents`, `Pages`, `Compare`, `Result`, and `Download`; avoid leading with internal terms like `intake`, `lane`, or `pipeline cockpit` in the main UI.
+- Prioritize the hierarchy defined in `UI_SPEC.md`: document list first, selected document detail second, runtime diagnostics third.
+- Keep upload/actions compact and utilitarian; avoid oversized hero sections or decorative panels for simple document actions.

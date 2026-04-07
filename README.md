@@ -4,6 +4,8 @@ PDF Extractor adalah aplikasi berbasis Next.js untuk mengelola ekstraksi teks da
 
 Repository ini sekarang sudah memiliki fondasi frontend interaktif, route internal untuk config runtime dan job actions, serta dokumentasi produk untuk membawa project dari dashboard prototype menuju pipeline extraction yang lebih production-ready.
 
+Direction UI sekarang juga mengacu pada `UI_SPEC.md`, yang memosisikan produk ini sebagai document extraction workspace, bukan dashboard dekoratif. Vocabulary dan hierarchy UI harus berpusat pada dokumen, status dokumen, status halaman, compare, dan result download.
+
 ## Highlights
 
 - multi-upload PDF dalam satu sesi,
@@ -235,6 +237,7 @@ npm run format
 
 - Product requirements document: `PRD.md`
 - Progress tracker and checklist: `PROGRESS.md`
+- UI specification and vocabulary guardrails: `UI_SPEC.md`
 
 ## Roadmap
 

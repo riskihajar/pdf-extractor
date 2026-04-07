@@ -1,3 +1,12 @@
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
 export function statusTone(status: string) {
@@ -38,15 +47,19 @@ export function StatCard({
   detail: string
 }) {
   return (
-    <div className="rounded-[1.4rem] border border-white/10 bg-white/6 p-4">
-      <p className="text-xs tracking-[0.22em] text-stone-400 uppercase">
-        {label}
-      </p>
-      <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white">
-        {value}
-      </p>
-      <p className="mt-2 text-sm leading-6 text-stone-300">{detail}</p>
-    </div>
+    <Card className="rounded-[1.4rem] border-white/10 bg-white/6 text-white ring-white/10">
+      <CardHeader className="gap-2">
+        <CardDescription className="text-xs tracking-[0.22em] text-stone-400 uppercase">
+          {label}
+        </CardDescription>
+        <CardTitle className="text-3xl font-semibold tracking-[-0.04em] text-white">
+          {value}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm leading-6 text-stone-300">{detail}</p>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -89,18 +102,19 @@ export function FilterPill({
   onClick?: () => void
 }) {
   return (
-    <button
-      type="button"
+    <Button
       onClick={onClick}
+      variant={active ? "secondary" : "outline"}
+      size="sm"
       className={cn(
-        "inline-flex rounded-full border px-3 py-1 text-xs transition",
+        "rounded-full px-3 text-xs transition",
         active
-          ? "border-amber-300/40 bg-amber-300/15 text-amber-100"
+          ? "border-amber-300/40 bg-amber-300/15 text-amber-100 hover:bg-amber-300/20"
           : "border-white/12 bg-white/6 text-stone-300 hover:bg-white/10"
       )}
     >
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -114,13 +128,19 @@ export function ConfigCard({
   hint: string
 }) {
   return (
-    <div className="rounded-[1.1rem] border border-white/10 bg-white/5 p-3">
-      <p className="text-[11px] tracking-[0.2em] text-stone-500 uppercase">
-        {label}
-      </p>
-      <h3 className="mt-2 text-sm font-medium text-white">{value}</h3>
-      <p className="mt-2 text-xs leading-5 text-stone-400">{hint}</p>
-    </div>
+    <Card className="rounded-[1.1rem] border-white/10 bg-white/5 text-white ring-white/10">
+      <CardHeader className="gap-2">
+        <CardDescription className="text-[11px] tracking-[0.2em] text-stone-500 uppercase">
+          {label}
+        </CardDescription>
+        <CardTitle className="text-sm font-medium text-white">
+          {value}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs leading-5 text-stone-400">{hint}</p>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -136,12 +156,13 @@ export function MiniAction({
   onClick?: () => void
 }) {
   return (
-    <button
-      type="button"
+    <Button
       disabled={disabled}
       onClick={onClick}
+      variant={subtle ? "outline" : "secondary"}
+      size="sm"
       className={cn(
-        "rounded-full px-3 py-1.5 text-xs font-medium transition",
+        "rounded-full px-3 text-xs font-medium transition",
         subtle
           ? "border border-white/10 bg-white/5 text-stone-200 hover:bg-white/10"
           : "bg-amber-300 text-stone-950 hover:bg-amber-200",
@@ -149,21 +170,22 @@ export function MiniAction({
       )}
     >
       {label}
-    </button>
+    </Button>
   )
 }
 
 export function EnginePill({ name, state }: { name: string; state: string }) {
   return (
-    <span
+    <Badge
+      variant="outline"
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1",
+        "inline-flex items-center gap-2 rounded-full px-2.5 py-1",
         statusTone(state)
       )}
     >
       <span className="text-[10px] tracking-[0.18em] uppercase">{name}</span>
       <span className="text-xs">{state}</span>
-    </span>
+    </Badge>
   )
 }
 
@@ -177,9 +199,10 @@ export function BackgroundLanePill({
   status: "idle" | "prepared"
 }) {
   return (
-    <span
+    <Badge
+      variant="outline"
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px]",
+        "inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px]",
         status === "prepared"
           ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-100"
           : "border-white/10 bg-white/5 text-stone-300"
@@ -187,6 +210,6 @@ export function BackgroundLanePill({
     >
       <span className="tracking-[0.18em] uppercase">{queue}</span>
       <span className="text-stone-300">{worker}</span>
-    </span>
+    </Badge>
   )
 }
