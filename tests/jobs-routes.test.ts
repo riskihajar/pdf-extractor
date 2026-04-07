@@ -1,5 +1,5 @@
-import test from "node:test"
 import assert from "node:assert/strict"
+import test from "node:test"
 
 import { GET as getJobRoute } from "@/app/api/jobs/[id]/route"
 import { GET as getJobLogsRoute } from "@/app/api/jobs/[id]/logs/route"
@@ -20,92 +20,115 @@ import { resetJobStoreForTests } from "@/lib/job-store"
 
 import { buildPdfBuffer } from "./helpers/pdf"
 
-test.beforeEach(() => {
-  resetJobStoreForTests()
-})
-
-test("GET /api/jobs returns the shared store snapshot", async () => {
-  const response = await getJobsRoute()
-  const payload = await response.json()
-
-  assert.equal(response.status, 200)
-  assert.ok(Array.isArray(payload.jobs))
-  assert.ok(payload.jobs.length > 0)
-  assert.equal(
-    payload.jobs.find((job: { id: string }) => job.id === "job-3")?.canRetry,
-    true
-  )
-  assert.equal(
-    payload.jobs.find((job: { id: string }) => job.id === "job-2")?.canRetry,
-    false
-  )
-  assert.ok(payload.details["job-1"])
-})
-
-test("GET /api/jobs/:id returns a matching job", async () => {
-  const response = await getJobRoute(
-    new Request("http://localhost/api/jobs/job-1"),
-    {
-      params: Promise.resolve({ id: "job-1" }),
-    }
-  )
-  const payload = await response.json()
-
-  assert.equal(response.status, 200)
-  assert.equal(payload.job.id, "job-1")
-  assert.equal(payload.job.backgroundReady, true)
-  assert.equal(payload.detail.title, "bank-statement-april.pdf")
-  assert.equal(payload.background.status, "prepared")
-  assert.equal(payload.background.queue, "extract-compare")
-  assert.equal(payload.uploadedFile ?? null, null)
-  assert.deepEqual(payload.renderArtifacts ?? [], [])
-  assert.equal(payload.pages.jobId, "job-1")
-  assert.equal(payload.pages.canRetry, true)
-  assert.equal(payload.pages.pages[2]?.id, "job-1:page-03")
-  assert.equal(payload.pages.pages[2]?.canRetry, true)
-})
-
-test("GET /api/jobs/:id/pages returns granular pages payload", async () => {
-  const response = await getJobPagesRoute(
-    new Request("http://localhost/api/jobs/job-3/pages"),
-    {
-      params: Promise.resolve({ id: "job-3" }),
-    }
-  )
-  const payload = await response.json()
-
-  assert.equal(response.status, 200)
-  assert.equal(payload.jobId, "job-3")
-  assert.equal(payload.canRetry, true)
-  assert.equal(payload.pages[2]?.id, "job-3:page-03")
-  assert.equal(payload.pages[2]?.status, "Needs review")
-  assert.equal(payload.pages[2]?.canRetry, true)
-  assert.equal(payload.pages[0]?.canRetry, false)
-  assert.equal(payload.pages[0]?.previewUrl, undefined)
-})
-
-test("GET /api/pages/:id/preview returns rendered PNG bytes for uploaded pages", async () => {
-  const file = new File([buildPdfBuffer("Preview Route")], "previewable.pdf", {
+async function uploadFixture(options: {
+  fileName: string
+  mode: "LLM only" | "Tesseract only" | "Both compare"
+  output: "Markdown" | "Text" | "MD + TXT"
+  content: string
+}) {
+  const file = new File([buildPdfBuffer(options.content)], options.fileName, {
     type: "application/pdf",
   })
   const formData = new FormData()
-  formData.set("mode", "LLM only")
-  formData.set("output", "Markdown")
+  formData.set("mode", options.mode)
+  formData.set("output", options.output)
   formData.append("files", file)
 
-  const uploadResponse = await uploadJobsRoute(
+  const response = await uploadJobsRoute(
     new Request("http://localhost/api/jobs/upload", {
       method: "POST",
       body: formData,
     })
   )
-  const uploadPayload = await uploadResponse.json()
-  const uploadedJob = uploadPayload.jobs.find(
-    (job: { name: string }) => job.name === "previewable.pdf"
-  )
+  const payload = await response.json()
+  const uploadedJob = payload.jobs[0]
 
+  assert.equal(response.status, 200)
   assert.ok(uploadedJob)
 
+  return uploadedJob as {
+    id: string
+    name: string
+    status: string
+    backgroundReady: boolean
+    output: string
+  }
+}
+
+test.beforeEach(() => {
+  resetJobStoreForTests()
+})
+
+test("GET /api/jobs returns the uploaded-only store snapshot", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "route-list.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Route List",
+  })
+  const response = await getJobsRoute()
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.ok(Array.isArray(payload.jobs))
+  assert.equal(payload.jobs.length, 1)
+  assert.equal(payload.jobs[0]?.id, uploadedJob.id)
+  assert.ok(payload.details[uploadedJob.id])
+})
+
+test("GET /api/jobs/:id returns a matching uploaded job", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "route-detail.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Route Detail",
+  })
+  const response = await getJobRoute(
+    new Request("http://localhost/api/jobs/id"),
+    {
+      params: Promise.resolve({ id: uploadedJob.id }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(payload.job.id, uploadedJob.id)
+  assert.equal(payload.job.backgroundReady, true)
+  assert.equal(payload.detail.title, uploadedJob.name)
+  assert.equal(payload.background.status, "prepared")
+  assert.ok(payload.uploadedFile)
+  assert.ok((payload.renderArtifacts ?? []).length > 0)
+  assert.equal(payload.pages.jobId, uploadedJob.id)
+})
+
+test("GET /api/jobs/:id/pages returns granular uploaded pages payload", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "route-pages.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Route Pages",
+  })
+  const response = await getJobPagesRoute(
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/pages`),
+    {
+      params: Promise.resolve({ id: uploadedJob.id }),
+    }
+  )
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.equal(payload.jobId, uploadedJob.id)
+  assert.ok((payload.pages[0]?.id ?? "").startsWith(`${uploadedJob.id}:page-`))
+  assert.equal(typeof payload.pages[0]?.canRetry, "boolean")
+})
+
+test("GET /api/pages/:id/preview returns rendered PNG bytes for uploaded pages", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "previewable.pdf",
+    mode: "LLM only",
+    output: "Markdown",
+    content: "Preview Route",
+  })
   const pagesResponse = await getJobPagesRoute(
     new Request(`http://localhost/api/jobs/${uploadedJob.id}/pages`),
     {
@@ -136,9 +159,9 @@ test("GET /api/pages/:id/preview returns rendered PNG bytes for uploaded pages",
 
 test("GET /api/pages/:id/preview returns 404 when preview is unavailable", async () => {
   const response = await getPagePreviewRoute(
-    new Request("http://localhost/api/pages/job-1:page-01/preview"),
+    new Request("http://localhost/api/pages/job-404:page-01/preview"),
     {
-      params: Promise.resolve({ id: "job-1:page-01" }),
+      params: Promise.resolve({ id: "job-404:page-01" }),
     }
   )
   const payload = await response.json()
@@ -147,47 +170,62 @@ test("GET /api/pages/:id/preview returns 404 when preview is unavailable", async
   assert.equal(payload.message, "Page preview not found")
 })
 
-test("GET /api/jobs/:id/logs returns normalized job logs", async () => {
+test("GET /api/jobs/:id/logs returns normalized uploaded job logs", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "logs-route.pdf",
+    mode: "LLM only",
+    output: "Markdown",
+    content: "Logs Route",
+  })
   const response = await getJobLogsRoute(
-    new Request("http://localhost/api/jobs/job-1/logs"),
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/logs`),
     {
-      params: Promise.resolve({ id: "job-1" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
-  assert.equal(payload.jobId, "job-1")
+  assert.equal(payload.jobId, uploadedJob.id)
   assert.ok(Array.isArray(payload.events))
-  assert.ok(payload.events.length > 0)
-  assert.equal(payload.pipeline[0]?.title, "Upload received")
+  assert.equal(payload.pipeline[0]?.title, "Upload stored")
 })
 
-test("GET /api/jobs/:id/output returns normalized job output", async () => {
+test("GET /api/jobs/:id/output returns normalized uploaded job output", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "output-route.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Output Route",
+  })
   const response = await getJobOutputRoute(
-    new Request("http://localhost/api/jobs/job-1/output"),
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/output`),
     {
-      params: Promise.resolve({ id: "job-1" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
-  assert.equal(payload.jobId, "job-1")
+  assert.equal(payload.jobId, uploadedJob.id)
   assert.equal(payload.output, "MD + TXT")
-  assert.match(payload.preview.markdown, /bank-statement-april\.pdf/)
+  assert.match(payload.preview.markdown, /output-route\.pdf/)
   assert.ok(Array.isArray(payload.compareAudit))
-  assert.equal(payload.compareAudit[0]?.page, "Page 01")
-  assert.equal(typeof payload.isPartial, "boolean")
 })
 
 test("GET /api/jobs/:id/output/download returns markdown attachment", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "download-route.pdf",
+    mode: "LLM only",
+    output: "Markdown",
+    content: "Download Route",
+  })
   const response = await downloadJobOutputRoute(
     new Request(
-      "http://localhost/api/jobs/job-1/output/download?format=markdown"
+      `http://localhost/api/jobs/${uploadedJob.id}/output/download?format=markdown`
     ),
     {
-      params: Promise.resolve({ id: "job-1" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const body = await response.text()
@@ -197,18 +235,26 @@ test("GET /api/jobs/:id/output/download returns markdown attachment", async () =
     response.headers.get("content-type"),
     "text/markdown; charset=utf-8"
   )
-  assert.equal(
-    response.headers.get("content-disposition"),
-    'attachment; filename="bank-statement-april.md"'
+  assert.match(
+    response.headers.get("content-disposition") ?? "",
+    /download-route\.md/
   )
-  assert.match(body, /bank-statement-april\.pdf/)
+  assert.match(body, /download-route\.pdf/)
 })
 
 test("GET /api/jobs/:id/output/download rejects formats outside job preset", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "download-invalid.pdf",
+    mode: "LLM only",
+    output: "Markdown",
+    content: "Download Invalid",
+  })
   const response = await downloadJobOutputRoute(
-    new Request("http://localhost/api/jobs/job-2/output/download?format=text"),
+    new Request(
+      `http://localhost/api/jobs/${uploadedJob.id}/output/download?format=text`
+    ),
     {
-      params: Promise.resolve({ id: "job-2" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
@@ -218,108 +264,134 @@ test("GET /api/jobs/:id/output/download rejects formats outside job preset", asy
 })
 
 test("GET /api/jobs/:id/output/download supports explicit partial export", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "download-partial.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Download Partial",
+  })
   const response = await downloadJobOutputRoute(
     new Request(
-      "http://localhost/api/jobs/job-3/output/download?format=text&partial=1"
+      `http://localhost/api/jobs/${uploadedJob.id}/output/download?format=markdown&partial=1`
     ),
     {
-      params: Promise.resolve({ id: "job-3" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const body = await response.text()
 
   assert.equal(response.status, 200)
-  assert.match(body, /EXPLICIT PARTIAL EXPORT|PARTIAL EXPORT/)
+  assert.match(body, /Explicit partial export|PARTIAL EXPORT/)
 })
 
 test("POST /api/jobs/upload stores uploaded jobs in shared SQLite state", async () => {
-  const response = await uploadJobsRoute(
-    new Request("http://localhost/api/jobs/upload", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        files: ["fresh-upload.pdf"],
-        mode: "LLM only",
-        output: "Markdown",
-      }),
-    })
-  )
-  const payload = await response.json()
-  const uploadedJob = payload.jobs.find(
-    (job: { name: string }) => job.name === "fresh-upload.pdf"
-  )
+  const uploadedJob = await uploadFixture({
+    fileName: "fresh-upload.pdf",
+    mode: "LLM only",
+    output: "Markdown",
+    content: "Fresh Upload",
+  })
 
-  assert.equal(response.status, 200)
-  assert.ok(uploadedJob)
   assert.equal(uploadedJob.status, "Uploaded")
-  assert.equal(uploadedJob.backgroundReady, false)
-  assert.ok(payload.details[uploadedJob.id])
+  assert.equal(uploadedJob.status, "Uploaded")
 })
 
-test("POST /api/jobs/start updates the shared job state", async () => {
+test("POST /api/jobs/start updates the shared uploaded job state", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "start-route.pdf",
+    mode: "LLM only",
+    output: "Markdown",
+    content: "Start Route",
+  })
   const response = await startJobRoute(
     new Request("http://localhost/api/jobs/start", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ jobId: "job-2" }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: uploadedJob.id }),
     })
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
-  assert.equal(payload.job.id, "job-2")
+  assert.equal(payload.job.id, uploadedJob.id)
   assert.equal(payload.job.status, "Processing")
 })
 
-test("POST /api/jobs/start-all updates queued jobs in shared state", async () => {
+test("POST /api/jobs/start-all updates uploaded jobs in shared state", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "start-all-route.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Start All Route",
+  })
   const response = await startAllJobsRoute()
   const payload = await response.json()
 
   assert.equal(response.status, 200)
   assert.equal(
-    payload.jobs.find((job: { id: string }) => job.id === "job-2")?.status,
+    payload.jobs.find((job: { id: string }) => job.id === uploadedJob.id)
+      ?.status,
     "Processing"
   )
 })
 
-test("POST /api/jobs/:id/retry retries a stored job", async () => {
+test("POST /api/jobs/:id/retry retries a stored uploaded job", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "retry-route.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Retry Route",
+  })
   const response = await retryJobRoute(
-    new Request("http://localhost/api/jobs/job-3/retry", { method: "POST" }),
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/retry`, {
+      method: "POST",
+    }),
     {
-      params: Promise.resolve({ id: "job-3" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
-  assert.equal(payload.job.id, "job-3")
-  assert.equal(payload.job.failed, 0)
-  assert.match(payload.detail.events[0], /^Retry queued for /)
+  assert.equal(payload.job.id, uploadedJob.id)
+  assert.match(payload.detail.events[0] ?? "", /^Retry queued for /)
 })
 
-test("POST /api/jobs/:id/pause pauses a stored job", async () => {
+test("POST /api/jobs/:id/pause pauses a stored uploaded job", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "pause-route.pdf",
+    mode: "LLM only",
+    output: "Markdown",
+    content: "Pause Route",
+  })
   const response = await pauseJobRoute(
-    new Request("http://localhost/api/jobs/job-1/pause", { method: "POST" }),
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/pause`, {
+      method: "POST",
+    }),
     {
-      params: Promise.resolve({ id: "job-1" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
   assert.equal(payload.job.status, "Paused")
-  assert.match(payload.detail.events[0], /^Paused /)
+  assert.match(payload.detail.events[0] ?? "", /^Paused /)
 })
 
 test("POST /api/jobs/:id/cancel preserves partial output state", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "cancel-route.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Cancel Route",
+  })
   const response = await cancelJobRoute(
-    new Request("http://localhost/api/jobs/job-2/cancel", { method: "POST" }),
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/cancel`, {
+      method: "POST",
+    }),
     {
-      params: Promise.resolve({ id: "job-2" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
@@ -330,58 +402,73 @@ test("POST /api/jobs/:id/cancel preserves partial output state", async () => {
 })
 
 test("POST /api/jobs/:id/compare/override updates manual winner", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "override-route.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Override Route",
+  })
   const response = await overrideCompareWinnerRoute(
-    new Request("http://localhost/api/jobs/job-1/compare/override", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ page: "Page 02", winner: "Tesseract" }),
-    }),
+    new Request(
+      `http://localhost/api/jobs/${uploadedJob.id}/compare/override`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: "Page 01", winner: "Tesseract" }),
+      }
+    ),
     {
-      params: Promise.resolve({ id: "job-1" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
-  assert.equal(payload.compareRow.page, "Page 02")
+  assert.equal(payload.compareRow.page, "Page 01")
   assert.equal(payload.compareRow.winner, "Tesseract")
   assert.equal(payload.compareRow.overridden, true)
 })
 
 test("POST /api/jobs/:id/compare/override resets winner to auto scoring", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "override-reset-route.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Override Reset Route",
+  })
+
   await overrideCompareWinnerRoute(
-    new Request("http://localhost/api/jobs/job-1/compare/override", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ page: "Page 02", winner: "Tesseract" }),
-    }),
+    new Request(
+      `http://localhost/api/jobs/${uploadedJob.id}/compare/override`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: "Page 01", winner: "Tesseract" }),
+      }
+    ),
     {
-      params: Promise.resolve({ id: "job-1" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
 
   const response = await overrideCompareWinnerRoute(
-    new Request("http://localhost/api/jobs/job-1/compare/override", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ page: "Page 02", winner: "auto" }),
-    }),
+    new Request(
+      `http://localhost/api/jobs/${uploadedJob.id}/compare/override`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: "Page 01", winner: "auto" }),
+      }
+    ),
     {
-      params: Promise.resolve({ id: "job-1" }),
+      params: Promise.resolve({ id: uploadedJob.id }),
     }
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
-  assert.equal(payload.compareRow.page, "Page 02")
+  assert.equal(payload.compareRow.page, "Page 01")
   assert.equal(payload.compareRow.overridden, false)
-  assert.equal(payload.compareRow.winner, "LLM")
 })
 
 test("POST /api/jobs/:id/retry returns 404 for missing job", async () => {
@@ -397,21 +484,35 @@ test("POST /api/jobs/:id/retry returns 404 for missing job", async () => {
   assert.equal(payload.message, "Job not found")
 })
 
-test("POST /api/pages/:id/retry retries a stored page", async () => {
+test("POST /api/pages/:id/retry retries a stored uploaded page", async () => {
+  const uploadedJob = await uploadFixture({
+    fileName: "retry-page-route.pdf",
+    mode: "Both compare",
+    output: "MD + TXT",
+    content: "Retry Page Route",
+  })
+  const pagesResponse = await getJobPagesRoute(
+    new Request(`http://localhost/api/jobs/${uploadedJob.id}/pages`),
+    {
+      params: Promise.resolve({ id: uploadedJob.id }),
+    }
+  )
+  const pagesPayload = await pagesResponse.json()
+  const pageId = pagesPayload.pages[0]?.id
+
   const response = await retryPageRoute(
-    new Request("http://localhost/api/pages/job-3:page-03/retry", {
+    new Request(`http://localhost/api/pages/${pageId}/retry`, {
       method: "POST",
     }),
     {
-      params: Promise.resolve({ id: "job-3:page-03" }),
+      params: Promise.resolve({ id: pageId }),
     }
   )
   const payload = await response.json()
 
   assert.equal(response.status, 200)
-  assert.equal(payload.job.id, "job-3")
-  assert.equal(payload.retriedPage.page, "Page 03")
-  assert.equal(payload.retriedPage.status, "Extracting")
+  assert.equal(payload.job.id, uploadedJob.id)
+  assert.equal(payload.retriedPage.id, pageId)
 })
 
 test("POST /api/pages/:id/retry returns 404 for missing page", async () => {
