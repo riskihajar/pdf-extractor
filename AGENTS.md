@@ -3,7 +3,7 @@
 ## Stack and entrypoints
 
 - Tech stack in active use: Next.js 16, React 19, TypeScript 5, Tailwind CSS v4, shadcn/ui, SQLite (`node:sqlite`), plus local `pdftoppm`, Tesseract, and OpenAI-compatible LLM runtime integration.
-- Single-package Next.js 16 App Router app; the only top-level page is `app/page.tsx`, which server-renders `DashboardShell` from `components/dashboard/dashboard-shell.tsx` using `getJobs()` from `lib/job-actions.ts`.
+- Single-package Next.js 16 App Router app; the only top-level page is `app/page.tsx`, which server-renders `Dashboard` from `components/dashboard/dashboard.tsx` using `getJobs()` from `lib/job-actions.ts`.
 - Most product behavior lives in server-side helpers under `lib/`; route handlers in `app/api/**/route.ts` are thin wrappers around `lib/job-actions.ts`.
 - Persistent dev state is stored in SQLite via `lib/job-store.ts` at `.data/jobs.sqlite` by default. Uploaded PDFs and rendered PNGs live under `.data/storage*`.
 
