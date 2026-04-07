@@ -15,6 +15,14 @@
     "shadcn": {
       "type": "local",
       "command": ["npx", "shadcn@latest", "mcp"]
+    },
+    "chrome-devtools": {
+      "type": "local",
+      "command": [
+        "/opt/homebrew/opt/node@24/bin/npx",
+        "chrome-devtools-mcp@latest",
+        "--autoConnect"
+      ]
     }
   }
 }
