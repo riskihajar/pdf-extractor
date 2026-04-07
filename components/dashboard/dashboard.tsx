@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   createJobDetail,
   type DetailTab,
   type ExtractionMode,
@@ -87,6 +93,7 @@ export function Dashboard({ initialState }: DashboardProps) {
     () => initialState.jobs[0]?.id ?? ""
   )
   const [activeTab, setActiveTab] = useState<DetailTab>("Pages")
+  const [isDetailOpen, setIsDetailOpen] = useState(false)
 
   /* upload state */
   const [pickedFiles, setPickedFiles] = useState<File[]>([])
@@ -506,38 +513,48 @@ export function Dashboard({ initialState }: DashboardProps) {
       />
 
       <div className="mx-auto w-full max-w-screen-2xl flex-1 p-4 sm:p-6">
-        <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <DocumentList
-            jobs={visibleJobs}
-            activeJobId={activeJobId}
-            activeFilter={activeFilter}
-            onFilterChange={setActiveFilter}
-            onSelectJob={(id) => {
-              setActiveJobId(id)
-              setActiveTab("Pages")
-            }}
-            onStartJob={(id) => void handleJobStart(id)}
-            onRetryJob={(id) => void handleRetry(id)}
-            onDownloadJob={handleDownloadJob}
-          />
-
-          <DocumentDetailPanel
-            job={activeJob ?? null}
-            detail={activeDetail}
-            activeTab={activeTab}
-            isDetailSyncing={isDetailSyncing}
-            shouldRefreshPages={needsPageRefresh}
-            outputSources={
-              activeJob ? (outputSources[activeJob.id] ?? null) : null
-            }
-            onTabChange={setActiveTab}
-            onPageRetry={(id) => void handlePageRetry(id)}
-            onWinnerOverride={(page, winner) =>
-              void handleWinnerOverride(page, winner)
-            }
-          />
-        </div>
+        <DocumentList
+          jobs={visibleJobs}
+          activeJobId={activeJobId}
+          activeFilter={activeFilter}
+          onFilterChange={setActiveFilter}
+          onSelectJob={(id) => {
+            setActiveJobId(id)
+            setActiveTab("Pages")
+            setIsDetailOpen(true)
+          }}
+          onStartJob={(id) => void handleJobStart(id)}
+          onRetryJob={(id) => void handleRetry(id)}
+          onDownloadJob={handleDownloadJob}
+        />
       </div>
+
+      <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+        <DialogContent className="flex max-h-[90vh] max-w-[90vw] flex-col overflow-hidden p-0 sm:max-w-[90vw]">
+          <DialogHeader className="sr-only">
+            <DialogTitle>
+              {activeDetail?.title ?? "Document detail"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto">
+            <DocumentDetailPanel
+              job={activeJob ?? null}
+              detail={activeDetail}
+              activeTab={activeTab}
+              isDetailSyncing={isDetailSyncing}
+              shouldRefreshPages={needsPageRefresh}
+              outputSources={
+                activeJob ? (outputSources[activeJob.id] ?? null) : null
+              }
+              onTabChange={setActiveTab}
+              onPageRetry={(id) => void handlePageRetry(id)}
+              onWinnerOverride={(page, winner) =>
+                void handleWinnerOverride(page, winner)
+              }
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   )
 }

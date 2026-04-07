@@ -6,7 +6,6 @@ import { Alert } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type {
   DetailTab,
@@ -91,13 +90,7 @@ export function DocumentDetailPanel({
   onWinnerOverride,
 }: DocumentDetailPanelProps) {
   if (!job || !detail) {
-    return (
-      <section className="rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
-        <p className="text-sm text-muted-foreground">
-          Select a document to view details.
-        </p>
-      </section>
-    )
+    return null
   }
 
   const outputMeta = detail.outputMeta
@@ -113,7 +106,7 @@ export function DocumentDetailPanel({
   const pendingPages = detail.pages.length - completedPages - failedPages
 
   return (
-    <section className="rounded-lg border bg-card/60 shadow-sm">
+    <section>
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
         <div className="min-w-0">
@@ -158,28 +151,25 @@ export function DocumentDetailPanel({
 
         {/* ── Pages ─────────────────────────── */}
         <TabsContent value="Pages" className="px-4 pt-3 pb-4">
-          <ScrollArea className="max-h-[65vh] pr-2">
-            <div className="space-y-2">
-              {detail.pages.map((task) => (
-                <PageCard
-                  key={task.page}
-                  task={task}
-                  onRetry={onPageRetry}
-                />
-              ))}
-              {shouldRefreshPages && !isDetailSyncing && (
-                <p className="pt-1 text-[10px] text-muted-foreground">
-                  Auto-refreshing while extraction is running…
-                </p>
-              )}
-            </div>
-          </ScrollArea>
+          <div className="space-y-2">
+            {detail.pages.map((task) => (
+              <PageCard
+                key={task.page}
+                task={task}
+                onRetry={onPageRetry}
+              />
+            ))}
+            {shouldRefreshPages && !isDetailSyncing && (
+              <p className="pt-1 text-[10px] text-muted-foreground">
+                Auto-refreshing while extraction is running…
+              </p>
+            )}
+          </div>
         </TabsContent>
 
         {/* ── Compare ───────────────────────── */}
         <TabsContent value="Compare" className="px-4 pt-3 pb-4">
-          <ScrollArea className="max-h-[65vh] pr-2">
-            <div className="space-y-2">
+          <div className="space-y-2">
               {detail.compareRows.map((row) => (
                 <Card key={row.page} className="border bg-card/80">
                   <CardContent className="p-3">
@@ -288,13 +278,12 @@ export function DocumentDetailPanel({
                   </CardContent>
                 </Card>
               ))}
-            </div>
-          </ScrollArea>
+          </div>
         </TabsContent>
 
         {/* ── Result (was Output) ────────────── */}
         <TabsContent value="Result" className="px-4 pt-3 pb-4">
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
             {/* Markdown */}
             <Card className="border bg-card/80">
               <CardContent className="p-3">
@@ -337,7 +326,7 @@ export function DocumentDetailPanel({
                     </Button>
                   </div>
                 </div>
-                <pre className="mt-2 max-h-60 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                <pre className="mt-2 max-h-96 overflow-auto font-mono text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
                   {detail.outputPreview.markdown}
                 </pre>
               </CardContent>
@@ -385,7 +374,7 @@ export function DocumentDetailPanel({
                     </Button>
                   </div>
                 </div>
-                <pre className="mt-2 max-h-60 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                <pre className="mt-2 max-h-96 overflow-auto font-mono text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
                   {detail.outputPreview.text}
                 </pre>
               </CardContent>
@@ -431,23 +420,21 @@ export function DocumentDetailPanel({
 
         {/* ── Logs ──────────────────────────── */}
         <TabsContent value="Logs" className="px-4 pt-3 pb-4">
-          <ScrollArea className="max-h-[65vh] pr-2">
-            <div className="space-y-1.5 font-mono text-xs text-muted-foreground">
-              {isDetailSyncing && (
-                <Alert className="border-amber-300/20 bg-amber-200/5 px-3 py-2 text-[10px] text-amber-100">
-                  Syncing logs…
-                </Alert>
-              )}
-              {detail.events.map((event, idx) => (
-                <div
-                  key={`${event}-${idx}`}
-                  className="rounded-md border bg-card/80 px-3 py-2"
-                >
-                  {event}
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
+          <div className="space-y-1.5 font-mono text-xs text-muted-foreground">
+            {isDetailSyncing && (
+              <Alert className="border-amber-300/20 bg-amber-200/5 px-3 py-2 text-[10px] text-amber-100">
+                Syncing logs…
+              </Alert>
+            )}
+            {detail.events.map((event, idx) => (
+              <div
+                key={`${event}-${idx}`}
+                className="rounded-md border bg-card/80 px-3 py-2"
+              >
+                {event}
+              </div>
+            ))}
+          </div>
         </TabsContent>
       </Tabs>
     </section>
