@@ -451,19 +451,52 @@ function PageCard({
   onRetry: (pageId: string) => void
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-card/80 p-3">
+    <div className="flex gap-3 rounded-md border bg-card/80 p-3">
+      {/* Thumbnail left */}
+      {task.previewUrl && (
+        <div className="relative h-32 w-24 shrink-0 overflow-hidden rounded-md border bg-muted/30">
+          <Image
+            src={task.previewUrl}
+            alt={`${task.page} preview`}
+            fill
+            className="object-contain"
+            sizes="96px"
+            unoptimized
+          />
+        </div>
+      )}
+
+      {/* Info right */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <h4 className="text-xs font-medium text-foreground">{task.page}</h4>
-          <Badge
-            variant="outline"
-            className={cn(
-              statusTone(task.status),
-              "rounded-full px-2 py-0.5 text-[10px]"
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h4 className="text-xs font-medium text-foreground">
+              {task.page}
+            </h4>
+            <Badge
+              variant="outline"
+              className={cn(
+                statusTone(task.status),
+                "rounded-full px-2 py-0.5 text-[10px]"
+              )}
+            >
+              {task.status}
+            </Badge>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <EnginePill name="LLM" state={task.llm} />
+            <EnginePill name="OCR" state={task.tesseract} />
+            {task.id && task.canRetry && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => onRetry(task.id!)}
+              >
+                Retry
+              </Button>
             )}
-          >
-            {task.status}
-          </Badge>
+          </div>
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
           {task.note}
@@ -474,36 +507,6 @@ function PageCard({
           </p>
         )}
       </div>
-
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        <EnginePill name="LLM" state={task.llm} />
-        <EnginePill name="OCR" state={task.tesseract} />
-        {task.id && task.canRetry && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-[10px]"
-            onClick={() => onRetry(task.id!)}
-          >
-            Retry page
-          </Button>
-        )}
-      </div>
-
-      {task.previewUrl && (
-        <div className="mt-2 w-full overflow-hidden rounded-md border bg-muted/30">
-          <div className="relative aspect-[3/4] max-h-48 w-full">
-            <Image
-              src={task.previewUrl}
-              alt={`${task.page} preview`}
-              fill
-              className="object-contain"
-              sizes="(max-width: 768px) 100vw, 300px"
-              unoptimized
-            />
-          </div>
-        </div>
-      )}
     </div>
   )
 }
