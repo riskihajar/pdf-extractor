@@ -18,7 +18,7 @@ import {
   runPreparedJobsOnce,
   runPreparedJobsUntilIdle,
   reserveNextJobId,
-  createStoredUpload,
+  deleteJobById,
   retryPageById,
   retryJobById,
   pauseJobById,
@@ -29,7 +29,7 @@ import {
   overrideCompareWinnerByPage,
 } from "@/lib/job-store"
 import { attachPagePreviewUrl } from "@/lib/page-preview"
-import { createStagedUpload, preparePdfPipeline } from "@/lib/pdf-pipeline"
+import { preparePdfPipeline } from "@/lib/pdf-pipeline"
 import { storeUploadedPdf } from "@/lib/pdf-storage"
 import type { LlmRunner } from "@/lib/llm-runtime"
 import type { TesseractRunner } from "@/lib/tesseract-runtime"
@@ -95,6 +95,10 @@ export type RetryPageResponse = {
 export type JobControlResponse = {
   job: JobRecord
   detail: JobDetail
+}
+
+export type DeleteJobResponse = {
+  jobId: string
 }
 
 export type OverrideCompareWinnerRequest = {
@@ -282,9 +286,9 @@ export async function uploadPdfFile(
 ) {
   const stored = await storeUploadedPdf(file)
   const jobId = reserveNextJobId()
-  const pipeline = createStagedUpload(stored, mode, output, jobId)
+  const pipeline = await preparePdfPipeline(stored, mode, output, jobId)
 
-  return createStoredUpload(pipeline)
+  return createUploadedJob({ pipeline })
 }
 
 export function getJobRenderArtifacts(jobId: string) {
@@ -311,6 +315,18 @@ export function cancelJob({
   jobId,
 }: StartJobRequest): JobControlResponse | null {
   return cancelJobById({ jobId })
+}
+
+export function deleteJob({
+  jobId,
+}: StartJobRequest): DeleteJobResponse | null {
+  const deleted = deleteJobById({ jobId })
+
+  if (!deleted) {
+    return null
+  }
+
+  return { jobId }
 }
 
 export function overrideCompareWinner(

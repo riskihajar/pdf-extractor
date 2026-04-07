@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, unlinkSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 
@@ -289,13 +289,15 @@ function ensureParentDirectory() {
 }
 
 function mapJobRow(row: JobRow): JobRecord {
+  const backgroundReady = row.status !== "Uploaded" || row.pages > 0
+
   return {
     id: row.id,
     canRetry: canRetryJob({
       status: row.status,
       failed: row.failed,
     }),
-    backgroundReady: row.status !== "Uploaded",
+    backgroundReady,
     name: row.name,
     pages: row.pages,
     mode: row.mode,
@@ -1543,6 +1545,10 @@ function migrateLegacyDetails(db: DatabaseSync) {
 }
 
 function seedDatabase(db: DatabaseSync) {
+  if (process.env.PDF_EXTRACTOR_ENABLE_SAMPLE_SEED !== "true") {
+    return
+  }
+
   const insertJob = db.prepare(
     `INSERT INTO jobs (
       id, name, pages, mode, output, status, progress, rendered, extracted, failed, sort_order
@@ -1566,6 +1572,26 @@ function seedDatabase(db: DatabaseSync) {
       )
       writeNormalizedDetail(db, job, initialJobDetails[job.id])
     })
+  })
+}
+
+function cleanupLegacyOrphanJobs(db: DatabaseSync) {
+  const orphanIds = db
+    .prepare(
+      `SELECT j.id
+       FROM jobs j
+       LEFT JOIN uploaded_files uf ON uf.job_id = j.id
+       WHERE uf.job_id IS NULL`
+    )
+    .all() as Array<{ id: string }>
+
+  if (orphanIds.length === 0) {
+    return
+  }
+
+  orphanIds.forEach(({ id }) => {
+    clearNormalizedTables(db, id)
+    db.prepare(`DELETE FROM jobs WHERE id = ?`).run(id)
   })
 }
 
@@ -1932,6 +1958,17 @@ function initializeDatabase(db: DatabaseSync) {
 
   if (row.count === 0) {
     seedDatabase(db)
+  }
+
+  cleanupLegacyOrphanJobs(db)
+
+  const refreshedRow = db
+    .prepare(`SELECT COUNT(*) as count FROM jobs`)
+    .get() as {
+    count: number
+  }
+
+  if (refreshedRow.count === 0) {
     return
   }
 
@@ -2137,6 +2174,7 @@ function readStateFromDatabase(db: DatabaseSync): JobStoreState {
     .prepare(
       `SELECT id, name, pages, mode, output, status, progress, rendered, extracted, failed, sort_order
        FROM jobs
+       WHERE id IN (SELECT job_id FROM uploaded_files)
        ORDER BY sort_order ASC, rowid ASC`
     )
     .all() as JobRow[]
@@ -2156,6 +2194,33 @@ function readStateFromDatabase(db: DatabaseSync): JobStoreState {
 
         return [job.id, normalizeDetail(job, legacyDetails[job.id])]
       })
+    ),
+  }
+}
+
+function readJobStateFromDatabase(db: DatabaseSync, jobId: string) {
+  const jobRow = db
+    .prepare(
+      `SELECT id, name, pages, mode, output, status, progress, rendered, extracted, failed, sort_order
+       FROM jobs
+       WHERE id = ?`
+    )
+    .get(jobId) as JobRow | undefined
+
+  if (!jobRow) {
+    return null
+  }
+
+  const normalizedDetails = buildDetailsFromNormalizedTables(db)
+  const legacyDetails = readLegacyDetails(db)
+  const job = mapJobRow(jobRow)
+  const normalized = normalizedDetails[job.id]
+
+  return {
+    job,
+    detail: normalizeDetail(
+      job,
+      normalized?.title ? (normalized as JobDetail) : legacyDetails[job.id]
     ),
   }
 }
@@ -2917,16 +2982,15 @@ export async function runPreparedJobsUntilIdle(
 }
 
 export function getJobById(jobId: string) {
-  const state = readStateFromDatabase(getDatabase())
-  const job = state.jobs.find((item) => item.id === jobId)
+  const result = readJobStateFromDatabase(getDatabase(), jobId)
 
-  if (!job) {
+  if (!result) {
     return null
   }
 
   return {
-    job: { ...job },
-    detail: structuredClone(state.details[jobId] ?? createJobDetail(job)),
+    job: { ...result.job },
+    detail: structuredClone(result.detail ?? createJobDetail(result.job)),
   }
 }
 
@@ -3180,6 +3244,46 @@ export function getRenderArtifactsByJobId(
     position: row.position,
     imagePath: row.image_path,
   }))
+}
+
+export function deleteJobById({ jobId }: UpdateJobInput) {
+  const db = getDatabase()
+  const current = getJobById(jobId)
+
+  if (!current) {
+    return null
+  }
+
+  const uploadedFile = getUploadedFileByJobId(jobId)
+  const renderArtifacts = getRenderArtifactsByJobId(jobId)
+
+  if (!uploadedFile) {
+    return null
+  }
+
+  withTransaction(db, () => {
+    clearNormalizedTables(db, jobId)
+    db.prepare(`DELETE FROM jobs WHERE id = ?`).run(jobId)
+  })
+
+  renderArtifacts.forEach((artifact) => {
+    if (existsSync(artifact.imagePath)) {
+      rmSync(artifact.imagePath, { force: true })
+    }
+  })
+
+  if (existsSync(uploadedFile.storedPath)) {
+    rmSync(uploadedFile.storedPath, { force: true })
+  }
+
+  const renderRoot = join(process.cwd(), ".data")
+  const jobRenderDir = join(renderRoot, "storage", "renders", jobId)
+
+  if (existsSync(jobRenderDir)) {
+    rmSync(jobRenderDir, { recursive: true, force: true })
+  }
+
+  return true
 }
 
 export function startAllStoredJobs(): JobStoreState {

@@ -25,6 +25,7 @@ export type DocumentListProps = {
   onStartJob: (jobId: string) => void
   onRetryJob: (jobId: string) => void
   onDownloadJob: (jobId: string) => void
+  onDeleteJob: (jobId: string) => void
 }
 
 export function DocumentList({
@@ -36,6 +37,7 @@ export function DocumentList({
   onStartJob,
   onRetryJob,
   onDownloadJob,
+  onDeleteJob,
 }: DocumentListProps) {
   return (
     <section>
@@ -69,11 +71,15 @@ export function DocumentList({
               <TableRow className="text-[11px] tracking-wider text-muted-foreground uppercase hover:bg-transparent">
                 <TableHead className="h-9 pl-4">File</TableHead>
                 <TableHead className="h-9 w-16">Pages</TableHead>
-                <TableHead className="h-9 hidden md:table-cell">Mode</TableHead>
-                <TableHead className="h-9 hidden lg:table-cell">Output</TableHead>
+                <TableHead className="hidden h-9 md:table-cell">Mode</TableHead>
+                <TableHead className="hidden h-9 lg:table-cell">
+                  Output
+                </TableHead>
                 <TableHead className="h-9">Status</TableHead>
                 <TableHead className="h-9 w-32">Progress</TableHead>
-                <TableHead className="h-9 w-16 hidden sm:table-cell">Failed</TableHead>
+                <TableHead className="hidden h-9 w-16 sm:table-cell">
+                  Failed
+                </TableHead>
                 <TableHead className="h-9 pr-4 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -88,17 +94,17 @@ export function DocumentList({
                   onClick={() => onSelectJob(job.id)}
                 >
                   <TableCell className="py-3 pl-4">
-                    <p className="text-sm font-medium text-foreground truncate max-w-[200px]">
+                    <p className="max-w-[200px] truncate text-sm font-medium text-foreground">
                       {job.name}
                     </p>
                   </TableCell>
                   <TableCell className="py-3 text-sm text-muted-foreground">
                     {job.pages}
                   </TableCell>
-                  <TableCell className="py-3 text-xs text-muted-foreground hidden md:table-cell">
+                  <TableCell className="hidden py-3 text-xs text-muted-foreground md:table-cell">
                     {job.mode}
                   </TableCell>
-                  <TableCell className="py-3 text-xs text-muted-foreground hidden lg:table-cell">
+                  <TableCell className="hidden py-3 text-xs text-muted-foreground lg:table-cell">
                     {job.output}
                   </TableCell>
                   <TableCell className="py-3">
@@ -125,7 +131,7 @@ export function DocumentList({
                       </p>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3 text-sm text-muted-foreground hidden sm:table-cell">
+                  <TableCell className="hidden py-3 text-sm text-muted-foreground sm:table-cell">
                     {job.failed > 0 ? (
                       <span className="text-rose-400">{job.failed}</span>
                     ) : (
@@ -133,15 +139,15 @@ export function DocumentList({
                     )}
                   </TableCell>
                   <TableCell className="py-3 pr-4">
-                    <div
-                      className="flex justify-end gap-1"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <div className="flex justify-end gap-1">
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-[11px]"
-                        onClick={() => onStartJob(job.id)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onStartJob(job.id)
+                        }}
                       >
                         Start
                       </Button>
@@ -149,7 +155,10 @@ export function DocumentList({
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-[11px]"
-                        onClick={() => onSelectJob(job.id)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onSelectJob(job.id)
+                        }}
                       >
                         View
                       </Button>
@@ -158,7 +167,10 @@ export function DocumentList({
                         size="sm"
                         className="h-7 px-2 text-[11px]"
                         disabled={!job.canRetry}
-                        onClick={() => onRetryJob(job.id)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onRetryJob(job.id)
+                        }}
                       >
                         Retry
                       </Button>
@@ -170,9 +182,23 @@ export function DocumentList({
                           job.status !== "Completed" &&
                           job.status !== "Partial success"
                         }
-                        onClick={() => onDownloadJob(job.id)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onDownloadJob(job.id)
+                        }}
                       >
                         Download
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-[11px] text-rose-300 hover:text-rose-200"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onDeleteJob(job.id)
+                        }}
+                      >
+                        Delete
                       </Button>
                     </div>
                   </TableCell>

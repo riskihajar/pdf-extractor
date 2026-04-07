@@ -17,7 +17,7 @@ test.beforeEach(() => {
   resetJobStoreForTests()
 })
 
-test("multipart upload stores PDF metadata without triggering render pipeline", async () => {
+test("multipart upload stores PDF metadata and prepares render artifacts", async () => {
   const file = new File([buildPdfBuffer("Hello Upload")], "hello-upload.pdf", {
     type: "application/pdf",
   })
@@ -49,17 +49,17 @@ test("multipart upload stores PDF metadata without triggering render pipeline", 
 
   assert.ok(storedFile)
   assert.equal(storedFile.originalName, "hello-upload.pdf")
-  assert.equal(storedFile.pageCount, null)
+  assert.equal(storedFile.pageCount, 1)
   await access(storedFile.storedPath)
-  assert.equal(artifacts.length, 0)
+  assert.equal(artifacts.length, 1)
   assert.ok(pages)
-  assert.equal(pages.pages.length, 0)
+  assert.equal(pages.pages.length, 1)
   assert.ok(pagesPayload)
   assert.ok(job?.uploadedFile)
-  assert.equal(job?.renderArtifacts?.length, 0)
-  assert.equal(job?.background.status, "idle")
-  assert.equal(job?.job.backgroundReady, false)
-  assert.equal(pagesPayload?.pages.length, 0)
+  assert.equal(job?.renderArtifacts?.length, 1)
+  assert.equal(job?.background.status, "prepared")
+  assert.equal(job?.job.backgroundReady, true)
+  assert.equal(pagesPayload?.pages.length, 1)
 })
 
 test("start flow advances a real uploaded PDF job into processing", async () => {
@@ -87,7 +87,8 @@ test("start flow advances a real uploaded PDF job into processing", async () => 
   const { startJob } = await import("@/lib/job-actions")
   const started = startJob({ jobId: uploadedJob.id })
 
-  assert.equal(started, null)
+  assert.ok(started)
+  assert.equal(started.job.status, "Processing")
 })
 
 test("multipart upload rejects invalid PDF files with structured errors", async () => {

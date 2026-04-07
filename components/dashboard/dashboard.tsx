@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -35,7 +38,10 @@ import { cn } from "@/lib/utils"
 
 import { ActionBar, type UploadIssue } from "./action-bar"
 import { AppHeader } from "./app-header"
-import { DocumentDetailPanel, type OutputSourceSnapshot } from "./document-detail-panel"
+import {
+  DocumentDetailPanel,
+  type OutputSourceSnapshot,
+} from "./document-detail-panel"
 import { DocumentList } from "./document-list"
 
 /* ── Types ──────────────────────────────────────────────────────── */
@@ -60,6 +66,12 @@ type UiNotice = {
   tone: "success" | "error"
   title: string
   message: string
+}
+
+type DeleteDialogState = {
+  open: boolean
+  job: JobRecord | null
+  isDeleting: boolean
 }
 
 type DashboardProps = {
@@ -112,6 +124,11 @@ export function Dashboard({ initialState }: DashboardProps) {
     Record<string, OutputSourceSnapshot>
   >({})
   const [isDetailSyncing, setIsDetailSyncing] = useState(false)
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState>({
+    open: false,
+    job: null,
+    isDeleting: false,
+  })
 
   /* ── Derived ────────────────────────────────────────────────── */
 
@@ -347,7 +364,9 @@ export function Dashboard({ initialState }: DashboardProps) {
       const fd = new FormData()
       fd.set("mode", mode)
       fd.set("output", output)
-      pickedFiles.forEach((f) => fd.append("files", f))
+      pickedFiles.forEach((f) => {
+        fd.append("files", f)
+      })
       const res = await fetch("/api/jobs/upload", {
         method: "POST",
         body: fd,
@@ -425,6 +444,88 @@ export function Dashboard({ initialState }: DashboardProps) {
     setActiveJobId(jobId)
     setActiveTab("Logs")
   }
+
+  function handleDeleteJob(jobId: string) {
+    const job = jobs.find((entry) => entry.id === jobId)
+
+    if (!job) return
+
+    setDeleteDialog({
+      open: true,
+      job,
+      isDeleting: false,
+    })
+  }
+
+  async function confirmDeleteJob() {
+    const job = deleteDialog.job
+
+    if (!job || deleteDialog.isDeleting) return
+
+    const jobId = job.id
+
+    setDeleteDialog((cur) => ({ ...cur, isDeleting: true }))
+
+    const res = await fetch(`/api/jobs/${jobId}/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
+
+    if (!res.ok) {
+      setDeleteDialog((cur) => ({ ...cur, isDeleting: false }))
+      setUiNotice({
+        tone: "error",
+        title: "Delete failed",
+        message: `Could not remove ${job.name}.`,
+      })
+      return
+    }
+
+    setJobs((cur) => cur.filter((entry) => entry.id !== jobId))
+    setJobDetails((cur) => {
+      const next = { ...cur }
+      delete next[jobId]
+      return next
+    })
+    setOutputSources((cur) => {
+      const next = { ...cur }
+      delete next[jobId]
+      return next
+    })
+    setUiNotice({
+      tone: "success",
+      title: "Document deleted",
+      message: `${job.name} removed from storage and queue.`,
+    })
+    setDeleteDialog({
+      open: false,
+      job: null,
+      isDeleting: false,
+    })
+
+    setActiveJobId((currentId) => {
+      if (currentId !== jobId) return currentId
+      const remaining = jobs.filter((entry) => entry.id !== jobId)
+      return remaining[0]?.id ?? ""
+    })
+
+    if (activeJobId === jobId) {
+      setIsDetailOpen(false)
+      setActiveTab("Pages")
+    }
+  }
+
+  function closeDeleteDialog(nextOpen: boolean) {
+    if (deleteDialog.isDeleting) return
+
+    setDeleteDialog((cur) => ({
+      open: nextOpen,
+      job: nextOpen ? cur.job : null,
+      isDeleting: false,
+    }))
+  }
+
   async function handlePageRetry(pageId: string) {
     if (!activeJob || !activeDetail) return
     const target = activeDetail.pages.find((p) => p.id === pageId)
@@ -460,8 +561,7 @@ export function Dashboard({ initialState }: DashboardProps) {
   function handleDownloadJob(jobId: string) {
     const job = jobs.find((j) => j.id === jobId)
     if (!job) return
-    const format =
-      job.output === "Text" ? "text" : "markdown"
+    const format = job.output === "Text" ? "text" : "markdown"
     window.location.assign(
       `/api/jobs/${encodeURIComponent(jobId)}/output/download?format=${format}`
     )
@@ -526,6 +626,7 @@ export function Dashboard({ initialState }: DashboardProps) {
           onStartJob={(id) => void handleJobStart(id)}
           onRetryJob={(id) => void handleRetry(id)}
           onDownloadJob={handleDownloadJob}
+          onDeleteJob={(id) => void handleDeleteJob(id)}
         />
       </div>
 
@@ -553,6 +654,35 @@ export function Dashboard({ initialState }: DashboardProps) {
               }
             />
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteDialog.open} onOpenChange={closeDeleteDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete document?</DialogTitle>
+            <DialogDescription>
+              {deleteDialog.job
+                ? `${deleteDialog.job.name} will be removed from the queue, database, and local storage.`
+                : "This document will be removed from the queue, database, and local storage."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => closeDeleteDialog(false)}
+              disabled={deleteDialog.isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmDeleteJob()}
+              disabled={deleteDialog.isDeleting}
+            >
+              {deleteDialog.isDeleting ? "Deleting..." : "Delete document"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </main>
